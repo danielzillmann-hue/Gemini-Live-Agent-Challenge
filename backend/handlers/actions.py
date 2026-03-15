@@ -63,10 +63,9 @@ async def process_single_action(
         },
     })
 
-    # Auto-save periodically
-    if len(session.story_events) % 5 == 0:
-        try:
-            await firestore_service.save_session(session)
+    # Auto-save after every action (protects against Cloud Run shutdown)
+    try:
+        await firestore_service.save_session(session)
         except Exception:
             logger.warning("Auto-save failed for session %s", session_id)
 

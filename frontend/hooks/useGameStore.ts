@@ -449,6 +449,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
         }));
         break;
 
+      case "system_notice":
+        store.addStoryEntry({
+          type: "system",
+          content: (data.message as string) || "System notice",
+        });
+        break;
+
       case "thinking":
         set({ isThinking: true });
         break;

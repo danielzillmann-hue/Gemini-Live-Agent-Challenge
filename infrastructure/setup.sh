@@ -144,6 +144,7 @@ gcloud run deploy "${BACKEND_SERVICE}" \
   --cpu=2 \
   --timeout=300 \
   --session-affinity \
+  --min-instances=1 \
   --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=${REGION},STORAGE_BUCKET=${STORAGE_BUCKET},CORS_ORIGINS=*,GOOGLE_GENAI_USE_VERTEXAI=1" \
   --project="${PROJECT_ID}"
 

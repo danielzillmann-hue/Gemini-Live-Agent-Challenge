@@ -173,6 +173,15 @@ async def create_session(req: CreateSessionRequest):
 @app.get("/api/sessions/{session_id}")
 async def get_session(session_id: str):
     session = game_engine.get_session(session_id)
+    # Auto-restore from Firestore if not in memory
+    if not session:
+        try:
+            session = await firestore_service.load_session(session_id)
+            if session:
+                game_engine.sessions[session.id] = session
+                logger.info("Restored session %s from Firestore", session_id)
+        except Exception:
+            pass
     if not session:
         raise HTTPException(404, "Session not found")
     return session.model_dump(mode="json")
@@ -347,6 +356,17 @@ async def text_to_speech(req: TTSRequest):
 @app.websocket("/ws/{session_id}")
 async def websocket_game(ws: WebSocket, session_id: str):
     session = game_engine.get_session(session_id)
+
+    # Auto-restore from Firestore if session not in memory (e.g., after Cloud Run cold start)
+    if not session:
+        try:
+            session = await firestore_service.load_session(session_id)
+            if session:
+                game_engine.sessions[session.id] = session
+                logger.info("Restored session %s from Firestore", session_id)
+        except Exception:
+            logger.warning("Failed to restore session %s from Firestore", session_id)
+
     if not session:
         await ws.close(code=4004, reason="Session not found")
         return

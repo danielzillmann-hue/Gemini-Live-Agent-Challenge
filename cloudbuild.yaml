@@ -43,6 +43,8 @@ steps:
       - "--timeout"
       - "300"
       - "--session-affinity"
+      - "--min-instances"
+      - "1"
       - "--set-env-vars"
       - "GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_REGION=us-central1,STORAGE_BUCKET=$PROJECT_ID-media,CORS_ORIGINS=*,GOOGLE_GENAI_USE_VERTEXAI=1"
 

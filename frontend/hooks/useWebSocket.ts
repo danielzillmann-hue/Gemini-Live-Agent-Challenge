@@ -17,10 +17,18 @@ export function useWebSocket(sessionId: string | null) {
     const ws = new WebSocket(`${WS_URL}/ws/${sessionId}`);
 
     ws.onopen = () => {
+      const wasReconnect = reconnectAttempts.current > 0;
       setConnected(true);
-      reconnectAttempts.current = 0; // Reset on successful connection
+      reconnectAttempts.current = 0;
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
+      }
+      // Notify user of reconnection (session may have been restored from Firestore)
+      if (wasReconnect) {
+        handleWSMessage({
+          type: "system_notice",
+          data: { message: "Reconnected to server. Session restored." },
+        });
       }
     };
 
