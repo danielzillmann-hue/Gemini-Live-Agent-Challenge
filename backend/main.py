@@ -399,18 +399,19 @@ class TTSRequest(BaseModel):
 async def text_to_speech(req: TTSRequest):
     from google.cloud import texttospeech
 
+    # Use Neural2/Journey voices (widely available) with Studio as fallback
     voice_configs = {
-        "narrator": {"name": "en-US-Studio-Q", "gender": "MALE", "pitch": -2.0, "rate": 0.95},
-        "npc_gruff": {"name": "en-US-Studio-J", "gender": "MALE", "pitch": -6.0, "rate": 0.85},
-        "npc_noble": {"name": "en-GB-Studio-B", "gender": "MALE", "pitch": 0.0, "rate": 0.9},
-        "npc_mysterious": {"name": "en-US-Studio-Q", "gender": "MALE", "pitch": -4.0, "rate": 0.8},
-        "npc_cheerful": {"name": "en-US-Studio-O", "gender": "MALE", "pitch": 2.0, "rate": 1.05},
-        "npc_female_warm": {"name": "en-US-Studio-O", "gender": "FEMALE", "pitch": 1.0, "rate": 0.95},
-        "npc_female_stern": {"name": "en-GB-Studio-C", "gender": "FEMALE", "pitch": -2.0, "rate": 0.9},
-        "npc_old": {"name": "en-US-Studio-J", "gender": "MALE", "pitch": -3.0, "rate": 0.8},
-        "npc_young": {"name": "en-US-Studio-O", "gender": "MALE", "pitch": 3.0, "rate": 1.0},
-        "npc_male": {"name": "en-US-Studio-O", "gender": "MALE", "pitch": 0.0, "rate": 0.95},
-        "npc_female": {"name": "en-US-Studio-O", "gender": "FEMALE", "pitch": 0.0, "rate": 0.95},
+        "narrator": {"name": "en-US-Neural2-D", "gender": "MALE", "pitch": -2.0, "rate": 0.95},
+        "npc_gruff": {"name": "en-US-Neural2-J", "gender": "MALE", "pitch": -6.0, "rate": 0.85},
+        "npc_noble": {"name": "en-GB-Neural2-B", "gender": "MALE", "pitch": 0.0, "rate": 0.9},
+        "npc_mysterious": {"name": "en-US-Neural2-D", "gender": "MALE", "pitch": -4.0, "rate": 0.8},
+        "npc_cheerful": {"name": "en-US-Neural2-A", "gender": "MALE", "pitch": 2.0, "rate": 1.05},
+        "npc_female_warm": {"name": "en-US-Neural2-F", "gender": "FEMALE", "pitch": 1.0, "rate": 0.95},
+        "npc_female_stern": {"name": "en-GB-Neural2-A", "gender": "FEMALE", "pitch": -2.0, "rate": 0.9},
+        "npc_old": {"name": "en-US-Neural2-J", "gender": "MALE", "pitch": -3.0, "rate": 0.8},
+        "npc_young": {"name": "en-US-Neural2-A", "gender": "MALE", "pitch": 3.0, "rate": 1.0},
+        "npc_male": {"name": "en-US-Neural2-D", "gender": "MALE", "pitch": 0.0, "rate": 0.95},
+        "npc_female": {"name": "en-US-Neural2-F", "gender": "FEMALE", "pitch": 0.0, "rate": 0.95},
     }
 
     config = voice_configs.get(req.voice_type, voice_configs["narrator"])
@@ -429,8 +430,8 @@ async def text_to_speech(req: TTSRequest):
             audio_config=texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3),
         )
         return {"audio": base64.b64encode(response.audio_content).decode(), "format": "mp3"}
-    except Exception:
-        logger.warning("TTS generation failed")
+    except Exception as e:
+        logger.exception("TTS generation failed: %s", e)
         return {"audio": "", "format": "none", "fallback": True}
 
 
