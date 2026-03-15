@@ -108,6 +108,62 @@ async def list_campaigns() -> list[CampaignSummary]:
     return results
 
 
+# ── Persistent Characters ─────────────────────────────────────────────────
+
+async def save_character(character_data: dict[str, Any], owner_id: str = "default") -> None:
+    """Save a character to the persistent roster (independent of sessions)."""
+    db = _get_client()
+    char_id = character_data.get("id", "")
+    doc_ref = db.collection("characters").document(char_id)
+    character_data["owner_id"] = owner_id
+    await doc_ref.set(character_data)
+    logger.info("Saved character %s (%s)", character_data.get("name"), char_id)
+
+
+async def load_character(character_id: str) -> dict[str, Any] | None:
+    """Load a character by ID."""
+    try:
+        db = _get_client()
+        doc = await db.collection("characters").document(character_id).get()
+        if doc.exists:
+            return doc.to_dict()
+    except Exception:
+        logger.exception("Failed to load character %s", character_id)
+    return None
+
+
+async def list_characters(owner_id: str = "default") -> list[dict[str, Any]]:
+    """List all saved characters for an owner."""
+    db = _get_client()
+    query = db.collection("characters").where("owner_id", "==", owner_id).limit(50)
+
+    results = []
+    async for doc in query.stream():
+        data = doc.to_dict()
+        results.append({
+            "id": doc.id,
+            "name": data.get("name", ""),
+            "race": data.get("race", ""),
+            "character_class": data.get("character_class", ""),
+            "level": data.get("level", 1),
+            "xp": data.get("xp", 0),
+            "hp": data.get("hp", 0),
+            "max_hp": data.get("max_hp", 0),
+            "portrait_url": data.get("portrait_url", ""),
+            "kills": data.get("kills", 0),
+            "quests_completed": data.get("quests_completed", 0),
+            "achievements": data.get("achievements", []),
+            "backstory": data.get("backstory", ""),
+        })
+    return results
+
+
+async def delete_character(character_id: str) -> None:
+    """Delete a character."""
+    db = _get_client()
+    await db.collection("characters").document(character_id).delete()
+
+
 # ── Story Events (for recap generation) ───────────────────────────────────
 
 async def save_story_events(session_id: str, events: list[dict[str, Any]]) -> None:

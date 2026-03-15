@@ -55,4 +55,41 @@ export const api = {
   listCampaigns() {
     return request<Array<Record<string, unknown>>>("/api/campaigns");
   },
+
+  // ── Character Roster ──────────────────────────────────────────────────
+
+  listSavedCharacters(ownerId: string = "default") {
+    return request<Array<Record<string, unknown>>>(`/api/characters?owner_id=${ownerId}`);
+  },
+
+  getSavedCharacter(characterId: string) {
+    return request<Record<string, unknown>>(`/api/characters/${characterId}`);
+  },
+
+  saveCharacterToRoster(characterData: Record<string, unknown>) {
+    return request<{ status: string }>("/api/characters/save", {
+      method: "POST",
+      body: JSON.stringify(characterData),
+    });
+  },
+
+  importCharacterToSession(sessionId: string, characterId: string) {
+    return request<Record<string, unknown>>(
+      `/api/sessions/${sessionId}/characters/import/${characterId}`,
+      { method: "POST" }
+    );
+  },
+
+  saveAllCharactersFromSession(sessionId: string) {
+    return request<{ status: string; characters: Array<Record<string, unknown>> }>(
+      `/api/sessions/${sessionId}/characters/save-all`,
+      { method: "POST" }
+    );
+  },
+
+  deleteSavedCharacter(characterId: string) {
+    return request<{ status: string }>(`/api/characters/${characterId}`, {
+      method: "DELETE",
+    });
+  },
 };

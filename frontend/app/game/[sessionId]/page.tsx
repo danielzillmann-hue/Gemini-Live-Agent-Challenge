@@ -161,9 +161,11 @@ export default function GamePage() {
   async function handleSave() {
     try {
       await api.saveSession(sessionId);
+      // Also save all characters to the persistent roster
+      await api.saveAllCharactersFromSession(sessionId);
       useGameStore.getState().addStoryEntry({
         type: "system",
-        content: "Game saved successfully.",
+        content: "Game and characters saved successfully.",
       });
     } catch {
       console.error("Failed to save");

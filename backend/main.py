@@ -249,6 +249,76 @@ async def list_campaigns():
     return [c.model_dump(mode="json") for c in campaigns]
 
 
+# ── Character Roster (persistent across campaigns) ────────────────────────
+
+@app.post("/api/characters/save")
+async def save_character_to_roster(data: dict[str, Any]):
+    """Save a character to the persistent roster for reuse across campaigns."""
+    await firestore_service.save_character(data, owner_id=data.get("owner_id", "default"))
+    return {"status": "saved", "character_id": data.get("id")}
+
+
+@app.get("/api/characters")
+async def list_saved_characters(owner_id: str = "default"):
+    """List all saved characters in the roster."""
+    return await firestore_service.list_characters(owner_id)
+
+
+@app.get("/api/characters/{character_id}")
+async def get_saved_character(character_id: str):
+    """Load a specific saved character."""
+    char = await firestore_service.load_character(character_id)
+    if not char:
+        raise HTTPException(404, "Character not found")
+    return char
+
+
+@app.post("/api/sessions/{session_id}/characters/import/{character_id}")
+async def import_character_to_session(session_id: str, character_id: str):
+    """Import a saved character into a game session."""
+    session = game_engine.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+
+    char_data = await firestore_service.load_character(character_id)
+    if not char_data:
+        raise HTTPException(404, "Character not found")
+
+    from game.models import Character
+    character = Character.model_validate(char_data)
+    # Heal to full for new campaign
+    character.hp = character.max_hp
+    character.conditions = []
+    character.is_dead = False
+
+    game_engine.add_player(session_id, character)
+    await manager.broadcast(session_id, {"type": "character_joined", "data": character.model_dump(mode="json")})
+    return character.model_dump(mode="json")
+
+
+@app.post("/api/sessions/{session_id}/characters/save-all")
+async def save_all_characters_from_session(session_id: str):
+    """Save all characters from a session to the persistent roster (after campaign ends)."""
+    session = game_engine.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+
+    saved = []
+    for char in session.players:
+        char_data = char.model_dump(mode="json")
+        await firestore_service.save_character(char_data)
+        saved.append({"id": char.id, "name": char.name, "level": char.level})
+
+    return {"status": "saved", "characters": saved}
+
+
+@app.delete("/api/characters/{character_id}")
+async def delete_saved_character(character_id: str):
+    """Delete a character from the roster."""
+    await firestore_service.delete_character(character_id)
+    return {"status": "deleted"}
+
+
 @app.get("/api/sessions/{session_id}/recap")
 async def get_session_recap(session_id: str):
     """Generate a 'Previously on...' recap with interleaved text + image."""
