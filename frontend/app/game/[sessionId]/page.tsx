@@ -129,11 +129,13 @@ export default function GamePage() {
       stream?.getTracks().forEach((t) => t.stop());
       if (videoRef.current) videoRef.current.srcObject = null;
       setCameraActive(false);
+      send("camera_toggle", { active: false });
     } else {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         if (videoRef.current) videoRef.current.srcObject = stream;
         setCameraActive(true);
+        send("camera_toggle", { active: true });
 
         // Send frames periodically for dice detection
         cameraIntervalRef.current = setInterval(() => {

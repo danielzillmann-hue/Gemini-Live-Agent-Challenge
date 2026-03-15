@@ -24,7 +24,32 @@ async def handle_narrate_scene(session_id: str, args: dict[str, Any], session: G
     return []
 
 
-async def handle_roll_check(session_id: str, args: dict, session: Any) -> list[dict]:
+async def handle_roll_check(session_id: str, args: dict[str, Any], session: GameSession | None) -> list[dict[str, Any]]:
+    # Check if camera is active — if so, ask player to roll physical dice
+    from main import camera_active_sessions, pending_dice_rolls
+    if session_id in camera_active_sessions:
+        # Store the pending roll and ask the player to roll physical dice
+        pending_dice_rolls[session_id] = {
+            "args": args,
+            "character": args.get("character", ""),
+            "ability": args.get("ability", ""),
+            "dc": args.get("dc", 10),
+        }
+        char_name = args.get("character", "Player")
+        ability = args.get("ability", "check")
+        dc = args.get("dc", 10)
+        return [
+            {"type": "narration", "data": {
+                "content": f"{char_name}, roll a {ability.upper()} check! (DC {dc}) — show your dice to the camera.",
+            }},
+            {"type": "dice_roll_requested", "data": {
+                "character": char_name,
+                "ability": ability,
+                "dc": dc,
+            }},
+        ]
+
+    # No camera — auto-roll (Option A)
     if not args.get("success", True):
         damage = args.get("damage", 0)
         if damage and session:

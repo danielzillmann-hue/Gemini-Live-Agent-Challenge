@@ -92,6 +92,11 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# Track which sessions have camera active (for dice roll mode)
+camera_active_sessions: set[str] = set()
+# Pending dice rolls waiting for physical dice input
+pending_dice_rolls: dict[str, dict[str, Any]] = {}  # session_id -> roll info
+
 
 # ── Wire up callbacks (avoids circular imports) ────────────────────────────
 
@@ -466,9 +471,15 @@ async def websocket_game(ws: WebSocket, session_id: str):
                 if transcript:
                     await _handle_player_action(session_id, session, {"text": transcript, "character_name": msg_data.get("character_name", "Player")})
             elif msg_type == "dice_roll":
-                await manager.broadcast(session_id, {"type": "dice_result", "data": msg_data})
+                # Physical dice result — resolve pending roll if one exists
+                await _handle_physical_dice(session_id, session, msg_data)
             elif msg_type == "camera_frame":
                 await _handle_camera_frame(session_id, session, msg_data)
+            elif msg_type == "camera_toggle":
+                if msg_data.get("active"):
+                    camera_active_sessions.add(session_id)
+                else:
+                    camera_active_sessions.discard(session_id)
             elif msg_type == "start_game":
                 await _handle_start_game(session_id, session)
             elif msg_type == "player_chat":
@@ -512,6 +523,61 @@ async def _handle_player_action(session_id: str, session, data: dict[str, Any]) 
         action_window.finish_combat_action(session_id)
 
 
+async def _handle_physical_dice(session_id: str, session, data: dict[str, Any]) -> None:
+    """Handle a physical dice roll result — resolve any pending roll check."""
+    value = data.get("value")
+    if value is None:
+        return
+
+    # Broadcast the dice result visually
+    await manager.broadcast(session_id, {"type": "dice_result", "data": data})
+
+    # Check if there's a pending roll waiting for physical dice
+    if session_id in pending_dice_rolls:
+        pending = pending_dice_rolls.pop(session_id)
+        dc = pending.get("dc", 10)
+        char_name = pending.get("character", "Player")
+        ability = pending.get("ability", "check")
+
+        # Find character's ability modifier
+        modifier = 0
+        if session:
+            for p in session.players:
+                if p.name.lower() == char_name.lower():
+                    modifier = p.ability_scores.modifier(ability) if hasattr(p.ability_scores, 'modifier') else 0
+                    break
+
+        total = value + modifier
+        success = total >= dc
+        is_crit = value == 20
+        is_fumble = value == 1
+
+        # Narrate the result
+        if is_crit:
+            narration = f"A natural 20! {char_name} succeeds spectacularly!"
+        elif is_fumble:
+            narration = f"A natural 1... {char_name} fails catastrophically."
+        elif success:
+            narration = f"{char_name} rolls a {value} + {modifier} = {total} against DC {dc}. Success!"
+        else:
+            narration = f"{char_name} rolls a {value} + {modifier} = {total} against DC {dc}. Failed."
+
+        await manager.broadcast(session_id, {
+            "type": "narration",
+            "data": {"content": narration},
+        })
+
+        # Now continue the AI narration with the result
+        context = game_engine.get_context_summary(session)
+        follow_up = (
+            f"The {ability} check result: {char_name} rolled {value} (total {total}) "
+            f"against DC {dc}. {'Success' if success else 'Failure'}. "
+            f"{'Critical success!' if is_crit else 'Critical failure!' if is_fumble else ''} "
+            f"Narrate what happens as a result."
+        )
+        await process_single_action(session_id, session, "narrator", follow_up)
+
+
 async def _handle_camera_frame(session_id: str, session, data: dict[str, Any]) -> None:
     frame_b64 = data.get("frame", "")
     if not frame_b64:
@@ -525,11 +591,14 @@ async def _handle_camera_frame(session_id: str, session, data: dict[str, Any]) -
         parsed = json.loads(result)
         if parsed.get("dice_found"):
             for die in parsed.get("values", []):
-                await manager.broadcast(session_id, {"type": "dice_result", "data": {
+                # Feed the detected dice value through the physical dice handler
+                await _handle_physical_dice(session_id, session, {
                     "character": data.get("character_name", "Player"),
-                    "roll_type": die.get("type", "d20"), "value": die["value"],
-                    "is_critical": die["value"] == 20, "is_fumble": die["value"] == 1,
-                }})
+                    "roll_type": die.get("type", "d20"),
+                    "value": die["value"],
+                    "is_critical": die["value"] == 20,
+                    "is_fumble": die["value"] == 1,
+                })
     except (json.JSONDecodeError, KeyError):
         pass
 

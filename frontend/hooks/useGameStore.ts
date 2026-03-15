@@ -449,6 +449,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
         }));
         break;
 
+      case "dice_roll_requested":
+        store.addStoryEntry({
+          type: "system",
+          content: `🎲 ${data.character as string}: Roll a ${(data.ability as string || "").toUpperCase()} check! (DC ${data.dc as number}) — show your dice to the camera.`,
+        });
+        break;
+
       case "system_notice":
         store.addStoryEntry({
           type: "system",
