@@ -310,14 +310,24 @@ async def _handle_player_action(
         msg["session_id"] = session_id
         await manager.broadcast(session_id, msg)
 
-        # Record narration events
+        # Record narration events and detect scene tags
         if msg["type"] == "narration":
+            content = msg["data"].get("content", "")
             session.add_event(StoryEvent(
                 event_type="narration",
-                content=msg["data"].get("content", ""),
+                content=content,
                 speaker="narrator",
                 drama_level=game_engine.calculate_drama_level(session),
             ))
+
+            # Detect [NEW_SCENE] or [CINEMATIC] tags and generate images
+            if "[NEW_SCENE]" in content or "[CINEMATIC]" in content:
+                # Strip tags from narration for clean display
+                clean_content = content.replace("[NEW_SCENE]", "").replace("[CINEMATIC]", "").strip()
+                # Generate scene image in background
+                asyncio.create_task(
+                    _generate_scene_from_narration(session_id, session, clean_content)
+                )
 
     # Send updated game state
     await manager.broadcast(session_id, {
@@ -466,6 +476,31 @@ async def _handle_start_game(session_id: str, session: GameSession) -> None:
 
 
 # ── Background Tasks ──────────────────────────────────────────────────────
+
+async def _generate_scene_from_narration(
+    session_id: str, session: GameSession, narration: str
+) -> None:
+    """Generate a scene image triggered by [NEW_SCENE] or [CINEMATIC] tags."""
+    try:
+        # Use first 200 chars of narration as the scene description
+        scene_desc = narration[:200]
+        scene_bytes = await media_service.generate_scene_image(
+            scene_description=scene_desc,
+            time_of_day=session.world.time_of_day,
+            weather=session.world.weather,
+        )
+        if scene_bytes:
+            url = await storage_service.upload_media(
+                scene_bytes, "image", "image/png", session_id
+            )
+            await manager.broadcast(session_id, {
+                "type": "scene_image",
+                "session_id": session_id,
+                "data": {"url": url, "description": scene_desc[:100]},
+            })
+    except Exception:
+        logger.warning("Scene generation from narration failed for session %s", session_id)
+
 
 async def _generate_world_map(session: GameSession) -> None:
     """Generate world map in background."""
