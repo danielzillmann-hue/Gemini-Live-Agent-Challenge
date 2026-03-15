@@ -352,6 +352,20 @@ runner = Runner(
 )
 
 
+_created_sessions: set[str] = set()
+
+
+async def _ensure_session(session_id: str) -> None:
+    """Create an ADK session if it doesn't exist yet."""
+    if session_id not in _created_sessions:
+        await session_service.create_session(
+            app_name="genesis_rpg",
+            user_id="player",
+            session_id=session_id,
+        )
+        _created_sessions.add(session_id)
+
+
 async def process_player_input(
     session_id: str,
     player_input: str,
@@ -361,6 +375,8 @@ async def process_player_input(
 
     Returns a list of actions/events to be dispatched to the frontend.
     """
+    await _ensure_session(session_id)
+
     context_prompt = (
         f"GAME STATE:\n{json.dumps(game_context, indent=2, default=str)}\n\n"
         f"PLAYER SAYS: {player_input}"

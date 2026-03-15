@@ -9,8 +9,8 @@ class Settings:
     REGION: str = os.getenv("GOOGLE_CLOUD_REGION", "us-central1")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
     GEMINI_FLASH_MODEL: str = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
-    IMAGEN_MODEL: str = os.getenv("IMAGEN_MODEL", "imagen-4")
-    VEO_MODEL: str = os.getenv("VEO_MODEL", "veo-3")
+    IMAGEN_MODEL: str = os.getenv("IMAGEN_MODEL", "imagen-3.0-generate-002")
+    VEO_MODEL: str = os.getenv("VEO_MODEL", "veo-2.0-generate-001")
 
     FIRESTORE_DATABASE: str = os.getenv("FIRESTORE_DATABASE", "(default)")
     STORAGE_BUCKET: str = os.getenv("STORAGE_BUCKET", f"{PROJECT_ID}-media")
