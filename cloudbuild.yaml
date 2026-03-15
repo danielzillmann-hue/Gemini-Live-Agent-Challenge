@@ -44,7 +44,7 @@ steps:
       - "300"
       - "--session-affinity"
       - "--set-env-vars"
-      - "GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_REGION=us-central1,STORAGE_BUCKET=$PROJECT_ID-media,CORS_ORIGINS=*"
+      - "GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_REGION=us-central1,STORAGE_BUCKET=$PROJECT_ID-media,CORS_ORIGINS=*,GOOGLE_GENAI_USE_VERTEXAI=1"
 
   # Build frontend
   - name: "gcr.io/cloud-builders/docker"
