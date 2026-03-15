@@ -152,7 +152,7 @@ export default function ChatPanel({ send, myName }: ChatPanelProps) {
 
   async function handleOffer(fromId: string, sdp: string) {
     const pc = getOrCreatePeer(fromId);
-    await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp }));
+    await pc.setRemoteDescription({ type: "offer", sdp } as RTCSessionDescriptionInit);
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     send("webrtc_signal", {
@@ -166,14 +166,14 @@ export default function ChatPanel({ send, myName }: ChatPanelProps) {
   async function handleAnswer(fromId: string, sdp: string) {
     const pc = peerConnections.current.get(fromId);
     if (pc) {
-      await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp }));
+      await pc.setRemoteDescription({ type: "answer", sdp } as RTCSessionDescriptionInit);
     }
   }
 
   async function handleIceCandidate(fromId: string, candidate: any) {
     const pc = peerConnections.current.get(fromId);
     if (pc && candidate) {
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      await pc.addIceCandidate(candidate as RTCIceCandidateInit);
     }
   }
 

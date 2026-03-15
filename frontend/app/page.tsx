@@ -83,6 +83,14 @@ export default function HomePage() {
 
   function handleStartGame() {
     if (sessionId) {
+      // Save character name so the game page knows this tab has a character
+      const { players } = useGameStore.getState();
+      if (players.length > 0) {
+        sessionStorage.setItem(
+          `genesis_char_${sessionId}`,
+          players[players.length - 1].name
+        );
+      }
       setPhase("launching");
       setTimeout(() => router.push(`/game/${sessionId}`), 1500);
     }

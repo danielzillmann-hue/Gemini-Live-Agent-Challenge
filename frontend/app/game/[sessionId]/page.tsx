@@ -65,27 +65,29 @@ export default function GamePage() {
     },
   });
 
-  // Auto-select character name (last added, likely "mine")
-  useEffect(() => {
-    if (players.length > 0 && !myCharacterName) {
-      setMyCharacterName(players[players.length - 1].name);
-    }
-  }, [players, myCharacterName]);
-
   // Check if this player needs to create a character (joined via direct link)
+  // Uses sessionStorage to track if THIS browser tab created a character
   useEffect(() => {
     if (isConnected && !hasCheckedCharacter.current) {
       hasCheckedCharacter.current = true;
-      // If no character name is set after a brief delay (waiting for state sync),
-      // this is a new player joining via link — show character creation
+
+      const createdChar = sessionStorage.getItem(`genesis_char_${sessionId}`);
+      if (createdChar) {
+        // This tab already created a character — restore name
+        setMyCharacterName(createdChar);
+        return;
+      }
+
+      // Wait for state sync, then check if we need character creation
       const timer = setTimeout(() => {
-        if (!myCharacterName) {
+        const storedChar = sessionStorage.getItem(`genesis_char_${sessionId}`);
+        if (!storedChar) {
           setNeedsCharacter(true);
         }
-      }, 1500);
+      }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [isConnected, myCharacterName]);
+  }, [isConnected, sessionId]);
 
   // Start game once connected and not yet started
   useEffect(() => {
@@ -181,7 +183,13 @@ export default function GamePage() {
               sessionId={sessionId}
               onComplete={() => {
                 setNeedsCharacter(false);
-                // Character name will be auto-set by the useEffect above
+                // Get the last added player (the one we just created)
+                const latestPlayers = useGameStore.getState().players;
+                if (latestPlayers.length > 0) {
+                  const name = latestPlayers[latestPlayers.length - 1].name;
+                  setMyCharacterName(name);
+                  sessionStorage.setItem(`genesis_char_${sessionId}`, name);
+                }
               }}
             />
           </div>

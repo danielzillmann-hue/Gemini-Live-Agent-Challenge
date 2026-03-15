@@ -546,7 +546,9 @@ async def _handle_player_action(
         await _process_single_action(session_id, session, character_name, player_input)
         return
 
-    # Multiplayer: route through ActionWindow
+    # Multiplayer: check combat state BEFORE submitting to avoid race
+    is_combat = action_window.is_combat(session)
+
     error = await action_window.submit_action(
         session_id, session, character_name, player_input,
     )
@@ -557,8 +559,8 @@ async def _handle_player_action(
         })
         return
 
-    # Combat actions process immediately (ActionWindow validates turn order)
-    if action_window.is_combat(session):
+    # Combat actions process immediately (ActionWindow validated turn order)
+    if is_combat:
         session.add_event(StoryEvent(
             event_type="player_action",
             content=player_input,
