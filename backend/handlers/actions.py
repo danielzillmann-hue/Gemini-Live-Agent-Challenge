@@ -66,8 +66,8 @@ async def process_single_action(
     # Auto-save after every action (protects against Cloud Run shutdown)
     try:
         await firestore_service.save_session(session)
-        except Exception:
-            logger.warning("Auto-save failed for session %s", session_id)
+    except Exception:
+        logger.warning("Auto-save failed for session %s", session_id)
 
 
 async def handle_batched_actions(

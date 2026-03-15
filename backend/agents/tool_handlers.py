@@ -24,12 +24,22 @@ async def handle_narrate_scene(session_id: str, args: dict[str, Any], session: G
     return []
 
 
+# These are set by main.py at startup to avoid circular imports
+_camera_active_sessions: set[str] | None = None
+_pending_dice_rolls: dict[str, dict] | None = None
+
+
+def set_dice_state(camera_sessions: set[str], pending_rolls: dict[str, dict]) -> None:
+    global _camera_active_sessions, _pending_dice_rolls
+    _camera_active_sessions = camera_sessions
+    _pending_dice_rolls = pending_rolls
+
+
 async def handle_roll_check(session_id: str, args: dict[str, Any], session: GameSession | None) -> list[dict[str, Any]]:
     # Check if camera is active — if so, ask player to roll physical dice
-    from main import camera_active_sessions, pending_dice_rolls
-    if session_id in camera_active_sessions:
+    if _camera_active_sessions and session_id in _camera_active_sessions:
         # Store the pending roll and ask the player to roll physical dice
-        pending_dice_rolls[session_id] = {
+        _pending_dice_rolls[session_id] = {
             "args": args,
             "character": args.get("character", ""),
             "ability": args.get("ability", ""),

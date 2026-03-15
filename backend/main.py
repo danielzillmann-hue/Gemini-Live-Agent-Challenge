@@ -144,6 +144,11 @@ async def _generate_scene_from_narration(session_id: str, session, narration: st
 
 
 set_action_callbacks(manager.broadcast, _generate_scene_from_narration)
+
+# Wire up dice state for tool handlers
+from agents.tool_handlers import set_dice_state
+set_dice_state(camera_active_sessions, pending_dice_rolls)
+
 action_window.set_callbacks(
     manager.broadcast, handle_batched_actions,
     lambda sid: len(manager.active.get(sid, [])),
