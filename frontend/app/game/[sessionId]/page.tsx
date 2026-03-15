@@ -20,6 +20,7 @@ import WorldMapPanel from "@/components/WorldMapPanel";
 import NPCJournal from "@/components/NPCJournal";
 import AudioManager from "@/components/AudioManager";
 import NarratorVoice from "@/components/NarratorVoice";
+import CharacterCreation from "@/components/CharacterCreation";
 import { api } from "@/lib/api";
 
 type SidePanel = "party" | "quests" | "inventory" | "map" | "npcs" | null;
@@ -32,6 +33,8 @@ export default function GamePage() {
   const [cameraActive, setCameraActive] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
   const [myCharacterName, setMyCharacterName] = useState<string>("");
+  const [needsCharacter, setNeedsCharacter] = useState(false);
+  const hasCheckedCharacter = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
@@ -57,6 +60,21 @@ export default function GamePage() {
       setMyCharacterName(players[players.length - 1].name);
     }
   }, [players, myCharacterName]);
+
+  // Check if this player needs to create a character (joined via direct link)
+  useEffect(() => {
+    if (isConnected && !hasCheckedCharacter.current) {
+      hasCheckedCharacter.current = true;
+      // If no character name is set after a brief delay (waiting for state sync),
+      // this is a new player joining via link — show character creation
+      const timer = setTimeout(() => {
+        if (!myCharacterName) {
+          setNeedsCharacter(true);
+        }
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [isConnected, myCharacterName]);
 
   // Start game once connected and not yet started
   useEffect(() => {
@@ -138,6 +156,22 @@ export default function GamePage() {
     <div className="h-screen w-screen flex flex-col bg-genesis-bg overflow-hidden">
       <AudioManager />
       <NarratorVoice />
+
+      {/* ── Character Creation Overlay (for players joining via link) ── */}
+      {needsCharacter && (
+        <div className="absolute inset-0 z-50 bg-genesis-bg/95 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="w-full max-w-4xl">
+            <CharacterCreation
+              sessionId={sessionId}
+              onComplete={() => {
+                setNeedsCharacter(false);
+                // Character name will be auto-set by the useEffect above
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Top Bar ──────────────────────────────────────────── */}
       <header className="h-12 flex items-center justify-between px-4 border-b border-genesis-border bg-genesis-panel/80 backdrop-blur-sm shrink-0">
         <div className="flex items-center gap-3">
