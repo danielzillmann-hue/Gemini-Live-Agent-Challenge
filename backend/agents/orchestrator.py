@@ -244,10 +244,42 @@ async def process_player_input(
     )
 
     events: list[dict[str, Any]] = []
+    seen_tool_calls: set[str] = set()  # Deduplicate tool calls
 
     async for event in runner.run_async(
         user_id="player", session_id=session_id, new_message=content,
     ):
+        # Capture INTERMEDIATE tool calls (ADK processes these internally,
+        # but we need to intercept them for dice results, XP, loot, etc.)
+        if not event.is_final_response() and event.content and event.content.parts:
+            for part in event.content.parts:
+                if part.function_call:
+                    call_id = f"{part.function_call.name}:{json.dumps(dict(part.function_call.args) if part.function_call.args else {}, sort_keys=True)}"
+                    if call_id not in seen_tool_calls:
+                        seen_tool_calls.add(call_id)
+                        events.append({
+                            "type": "tool_call",
+                            "name": part.function_call.name,
+                            "args": dict(part.function_call.args) if part.function_call.args else {},
+                        })
+                # Also capture tool responses that contain our tool results
+                if part.function_response:
+                    try:
+                        response_data = dict(part.function_response.response) if part.function_response.response else {}
+                        # If the tool returned roll/combat results, extract them
+                        if "roll" in response_data or "success" in response_data:
+                            call_id = f"roll_result:{json.dumps(response_data, sort_keys=True, default=str)}"
+                            if call_id not in seen_tool_calls:
+                                seen_tool_calls.add(call_id)
+                                events.append({
+                                    "type": "tool_call",
+                                    "name": response_data.get("action", "roll_check"),
+                                    "args": response_data,
+                                })
+                    except Exception:
+                        pass
+
+        # Capture FINAL response (narration text)
         if event.is_final_response():
             if event.content and event.content.parts:
                 for part in event.content.parts:
@@ -271,11 +303,13 @@ async def process_player_input(
                                 pass
                         events.append({"type": "narration", "content": text})
                     if part.function_call:
-                        events.append({
-                            "type": "tool_call",
-                            "name": part.function_call.name,
-                            "args": dict(part.function_call.args) if part.function_call.args else {},
-                        })
+                        call_id = f"{part.function_call.name}:{json.dumps(dict(part.function_call.args) if part.function_call.args else {}, sort_keys=True)}"
+                        if call_id not in seen_tool_calls:
+                            events.append({
+                                "type": "tool_call",
+                                "name": part.function_call.name,
+                                "args": dict(part.function_call.args) if part.function_call.args else {},
+                            })
 
     return events
 
