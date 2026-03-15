@@ -139,7 +139,10 @@ async def _generate_scene_from_narration(session_id: str, session, narration: st
 
 
 set_action_callbacks(manager.broadcast, _generate_scene_from_narration)
-action_window.set_callbacks(manager.broadcast, handle_batched_actions)
+action_window.set_callbacks(
+    manager.broadcast, handle_batched_actions,
+    lambda sid: len(manager.active.get(sid, [])),
+)
 
 
 # ── REST API ───────────────────────────────────────────────────────────────

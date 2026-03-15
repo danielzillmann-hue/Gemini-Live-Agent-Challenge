@@ -32,11 +32,13 @@ class ActionWindow:
         self._lock = asyncio.Lock()
         self._broadcast = None
         self._process_batch = None
+        self._get_connected_count = None
 
-    def set_callbacks(self, broadcast, process_batch) -> None:
+    def set_callbacks(self, broadcast, process_batch, get_connected_count=None) -> None:
         """Set callback functions (avoids circular imports)."""
         self._broadcast = broadcast
         self._process_batch = process_batch
+        self._get_connected_count = get_connected_count
 
     def is_combat(self, session: GameSession) -> bool:
         return session.combat.is_active
@@ -82,9 +84,9 @@ class ActionWindow:
         )
         self.submitted.setdefault(session_id, set()).add(character_name.lower())
 
-        alive_players = [p for p in session.players if p.hp > 0]
         submitted_count = len(self.submitted.get(session_id, set()))
-        total_players = len(alive_players)
+        # Use connected client count (not character count) to determine when all players have submitted
+        total_players = self._get_connected_count(session_id) if self._get_connected_count else len([p for p in session.players if p.hp > 0])
 
         if self._broadcast:
             await self._broadcast(session_id, {
@@ -114,6 +116,7 @@ class ActionWindow:
         for remaining in range(ACTION_WINDOW_SECONDS, 0, -1):
             await asyncio.sleep(1)
             if remaining % 3 == 0 or remaining <= 3:
+                total = self._get_connected_count(session_id) if self._get_connected_count else len([p for p in session.players if p.hp > 0])
                 if self._broadcast:
                     await self._broadcast(session_id, {
                         "type": "action_window",
@@ -121,7 +124,7 @@ class ActionWindow:
                             "status": "countdown",
                             "seconds_remaining": remaining,
                             "submitted_count": len(self.submitted.get(session_id, set())),
-                            "total_players": len([p for p in session.players if p.hp > 0]),
+                            "total_players": total,
                         },
                     })
         await self._close_window(session_id, session)
