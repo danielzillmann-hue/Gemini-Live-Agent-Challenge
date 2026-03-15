@@ -403,11 +403,11 @@ async def text_to_speech(req: TTSRequest):
     voice_configs = {
         "narrator": {"name": "en-US-Neural2-D", "gender": "MALE", "pitch": -2.0, "rate": 0.95},
         "npc_gruff": {"name": "en-US-Neural2-J", "gender": "MALE", "pitch": -6.0, "rate": 0.85},
-        "npc_noble": {"name": "en-GB-Neural2-B", "gender": "MALE", "pitch": 0.0, "rate": 0.9},
+        "npc_noble": {"name": "en-US-Neural2-J", "gender": "MALE", "pitch": 2.0, "rate": 0.9},
         "npc_mysterious": {"name": "en-US-Neural2-D", "gender": "MALE", "pitch": -4.0, "rate": 0.8},
         "npc_cheerful": {"name": "en-US-Neural2-A", "gender": "MALE", "pitch": 2.0, "rate": 1.05},
         "npc_female_warm": {"name": "en-US-Neural2-F", "gender": "FEMALE", "pitch": 1.0, "rate": 0.95},
-        "npc_female_stern": {"name": "en-GB-Neural2-A", "gender": "FEMALE", "pitch": -2.0, "rate": 0.9},
+        "npc_female_stern": {"name": "en-US-Neural2-F", "gender": "FEMALE", "pitch": -2.0, "rate": 0.9},
         "npc_old": {"name": "en-US-Neural2-J", "gender": "MALE", "pitch": -3.0, "rate": 0.8},
         "npc_young": {"name": "en-US-Neural2-A", "gender": "MALE", "pitch": 3.0, "rate": 1.0},
         "npc_male": {"name": "en-US-Neural2-D", "gender": "MALE", "pitch": 0.0, "rate": 0.95},
