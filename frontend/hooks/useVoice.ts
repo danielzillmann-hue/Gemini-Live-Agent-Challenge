@@ -1,5 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type SpeechRecognitionInstance = any;
+
 interface UseVoiceOptions {
   onTranscript: (text: string) => void;
   onAudioData?: (base64: string) => void;
@@ -8,25 +11,25 @@ interface UseVoiceOptions {
 export function useVoice({ onTranscript, onAudioData }: UseVoiceOptions) {
   const [isListening, setIsListening] = useState(false);
   const [isSupported, setIsSupported] = useState(true);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
   const startListening = useCallback(async () => {
     // Speech Recognition API
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognition) {
+    if (!SpeechRecognitionCtor) {
       setIsSupported(false);
       return;
     }
 
-    const recognition = new SpeechRecognition();
+    const recognition = new SpeechRecognitionCtor();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.onresult = (event: any) => {
       let transcript = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
@@ -103,10 +106,3 @@ export function useVoice({ onTranscript, onAudioData }: UseVoiceOptions) {
   };
 }
 
-// Type augmentation for Web Speech API
-declare global {
-  interface Window {
-    SpeechRecognition: typeof SpeechRecognition;
-    webkitSpeechRecognition: typeof SpeechRecognition;
-  }
-}
