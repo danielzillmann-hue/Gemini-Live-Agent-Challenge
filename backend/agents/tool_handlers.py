@@ -36,39 +36,53 @@ def set_dice_state(camera_sessions: set[str], pending_rolls: dict[str, dict]) ->
 
 
 async def handle_roll_check(session_id: str, args: dict[str, Any], session: GameSession | None) -> list[dict[str, Any]]:
+    # Normalize field names — function_call uses character_name/difficulty_class,
+    # function_response uses character/dc/roll/total/success
+    char_name = args.get("character", args.get("character_name", ""))
+    ability = args.get("ability", "check")
+    dc = args.get("dc", args.get("difficulty_class", 10))
+    roll = args.get("roll", 0)
+    total = args.get("total", roll)
+    success = args.get("success", True)
+
+    # If this is a function_call (no roll value), skip — wait for the function_response
+    if not roll and "success" not in args:
+        return []
+
     # Check if camera is active — if so, ask player to roll physical dice
     if _camera_active_sessions and session_id in _camera_active_sessions:
-        # Store the pending roll and ask the player to roll physical dice
         _pending_dice_rolls[session_id] = {
-            "args": args,
-            "character": args.get("character", ""),
-            "ability": args.get("ability", ""),
-            "dc": args.get("dc", 10),
+            "args": args, "character": char_name, "ability": ability, "dc": dc,
         }
-        char_name = args.get("character", "Player")
-        ability = args.get("ability", "check")
-        dc = args.get("dc", 10)
         return [
             {"type": "narration", "data": {
                 "content": f"{char_name}, roll a {ability.upper()} check! (DC {dc}) — show your dice to the camera.",
             }},
             {"type": "dice_roll_requested", "data": {
-                "character": char_name,
-                "ability": ability,
-                "dc": dc,
+                "character": char_name, "ability": ability, "dc": dc,
             }},
         ]
 
-    # No camera — auto-roll (Option A)
-    if not args.get("success", True):
+    # Apply damage on failed saves
+    if not success:
         damage = args.get("damage", 0)
         if damage and session:
-            char_name = args.get("character", "")
             for p in session.players:
                 if p.name.lower() == char_name.lower():
                     p.hp = max(0, p.hp - damage)
                     break
-    return [{"type": "dice_result", "data": args}]
+
+    return [{"type": "dice_result", "data": {
+        "character": char_name,
+        "ability": ability,
+        "roll_type": "d20",
+        "value": roll,
+        "total": total,
+        "dc": dc,
+        "success": success,
+        "is_critical": args.get("critical_success", roll == 20),
+        "is_fumble": args.get("critical_failure", roll == 1),
+    }}]
 
 
 async def handle_start_combat(session_id: str, args: dict, session: Any) -> list[dict]:
