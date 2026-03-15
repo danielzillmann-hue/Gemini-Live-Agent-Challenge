@@ -36,6 +36,9 @@ interface GameStore {
   actionWindowTotal: number;
   hasSubmittedAction: boolean;
 
+  // Chat
+  chatMessages: Array<{ id: string; sender: string; message: string; timestamp: number }>;
+
   // Narrative
   storyLog: StoryEntry[];
   currentSceneImage: string | null;
@@ -91,6 +94,7 @@ const initialState = {
   actionWindowSubmitted: 0,
   actionWindowTotal: 0,
   hasSubmittedAction: false,
+  chatMessages: [],
   storyLog: [],
   currentSceneImage: null,
   currentSceneVideo: null,
@@ -378,6 +382,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
         }
         break;
       }
+
+      case "player_chat":
+        set((state) => ({
+          chatMessages: [
+            ...state.chatMessages,
+            {
+              id: generateId(),
+              sender: data.sender as string,
+              message: data.message as string,
+              timestamp: Date.now(),
+            },
+          ].slice(-100),
+        }));
+        break;
 
       case "thinking":
         set({ isThinking: true });

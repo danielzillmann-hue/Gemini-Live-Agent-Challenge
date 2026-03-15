@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Mic, MicOff, Send, Camera, CameraOff, Volume2, VolumeX, MessageSquare, MessageSquareOff,
-  Swords, Map, BookOpen, Backpack, Users, Settings, Save,
+  Swords, Map, BookOpen, Backpack, Users, Settings, Save, MessageCircle,
 } from "lucide-react";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useVoice } from "@/hooks/useVoice";
@@ -21,9 +21,10 @@ import NPCJournal from "@/components/NPCJournal";
 import AudioManager from "@/components/AudioManager";
 import NarratorVoice from "@/components/NarratorVoice";
 import CharacterCreation from "@/components/CharacterCreation";
+import ChatPanel from "@/components/ChatPanel";
 import { api } from "@/lib/api";
 
-type SidePanel = "party" | "quests" | "inventory" | "map" | "npcs" | null;
+type SidePanel = "party" | "quests" | "inventory" | "map" | "npcs" | "chat" | null;
 
 export default function GamePage() {
   const params = useParams();
@@ -232,6 +233,7 @@ export default function GamePage() {
             { id: "inventory" as SidePanel, icon: Backpack, label: "Inventory" },
             { id: "map" as SidePanel, icon: Map, label: "World Map" },
             { id: "npcs" as SidePanel, icon: Swords, label: "NPCs" },
+            { id: "chat" as SidePanel, icon: MessageCircle, label: "Party Chat" },
           ].map(({ id, icon: Icon, label }) => (
             <button
               key={id}
@@ -261,6 +263,7 @@ export default function GamePage() {
             {sidePanel === "inventory" && <Inventory />}
             {sidePanel === "map" && <WorldMapPanel />}
             {sidePanel === "npcs" && <NPCJournal />}
+            {sidePanel === "chat" && <ChatPanel send={send} myName={myCharacterName || players[0]?.name || "Player"} />}
           </motion.aside>
         )}
 

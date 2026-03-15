@@ -501,6 +501,23 @@ async def websocket_game(ws: WebSocket, session_id: str):
             elif msg_type == "start_game":
                 await _handle_start_game(session_id, session)
 
+            elif msg_type == "player_chat":
+                # Text chat — broadcast to all players (not sent to AI)
+                await manager.broadcast(session_id, {
+                    "type": "player_chat",
+                    "data": {
+                        "sender": msg_data.get("sender", "Unknown"),
+                        "message": msg_data.get("message", ""),
+                    },
+                })
+
+            elif msg_type == "webrtc_signal":
+                # WebRTC signaling — relay to all other clients
+                await manager.broadcast(session_id, {
+                    "type": "webrtc_signal",
+                    "data": msg_data,
+                })
+
             else:
                 await manager.send_personal(ws, {
                     "type": "error",
