@@ -383,6 +383,58 @@ export const useGameStore = create<GameStore>((set, get) => ({
         break;
       }
 
+      case "xp_awarded": {
+        const xp = data.xp as number;
+        const reason = (data.reason as string) || "";
+        const levelUps = (data.level_ups || []) as Array<Record<string, unknown>>;
+        store.addStoryEntry({
+          type: "system",
+          content: `+${xp} XP${reason ? ` — ${reason}` : ""}`,
+        });
+        for (const lu of levelUps) {
+          store.addStoryEntry({
+            type: "system",
+            content: `${lu.character as string} leveled up to Level ${lu.new_level as number}! (+${lu.hp_gained as number} HP)`,
+          });
+        }
+        break;
+      }
+
+      case "achievement": {
+        const title = data.title as string;
+        const desc = (data.description as string) || "";
+        const icon = (data.icon as string) || "";
+        const earnedBy = (data.earned_by as string) || "";
+        store.addStoryEntry({
+          type: "system",
+          content: `${icon} Achievement Unlocked: ${title} — ${desc} (${earnedBy})`,
+        });
+        break;
+      }
+
+      case "loot_found": {
+        const item = (data.item || {}) as Record<string, unknown>;
+        store.addStoryEntry({
+          type: "system",
+          content: `Loot found: ${item.name as string}${item.rarity !== "common" ? ` [${item.rarity as string}]` : ""} — ${(item.description as string) || ""}`,
+        });
+        break;
+      }
+
+      case "consequence":
+        store.addStoryEntry({
+          type: "system",
+          content: `World shift: ${data.effect as string}`,
+        });
+        break;
+
+      case "faction_update":
+        store.addStoryEntry({
+          type: "system",
+          content: `${data.faction as string} reputation ${(data.new_reputation as number) > 0 ? "improved" : "worsened"} with ${data.character as string}${data.reason ? ` — ${data.reason as string}` : ""}`,
+        });
+        break;
+
       case "player_chat":
         set((state) => ({
           chatMessages: [

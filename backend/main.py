@@ -395,40 +395,107 @@ async def list_campaigns():
     return [c.model_dump(mode="json") for c in campaigns]
 
 
+@app.get("/api/sessions/{session_id}/recap")
+async def get_session_recap(session_id: str):
+    """Generate a 'Previously on...' session recap."""
+    session = game_engine.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+
+    recap_text = game_engine.generate_session_recap(session)
+
+    # Use Gemini to make it dramatic
+    try:
+        dramatic_recap = await gemini_service.generate_text(
+            prompt=f"Rewrite this session recap as a dramatic 'Previously on...' narration in 3-4 sentences. Make it cinematic and compelling:\n\n{recap_text}",
+            system_instruction="You are a dramatic narrator creating a 'Previously on...' recap for a fantasy RPG. Write in present tense, vivid prose. Be concise but evocative.",
+            temperature=0.8,
+            max_tokens=300,
+        )
+    except Exception:
+        dramatic_recap = recap_text
+
+    return {"recap": dramatic_recap, "raw": recap_text}
+
+
 class TTSRequest(BaseModel):
     text: str
-    voice_type: str = "narrator"  # narrator, npc_male, npc_female
+    voice_type: str = "narrator"
+    # narrator, npc_gruff, npc_noble, npc_mysterious, npc_cheerful,
+    # npc_female_warm, npc_female_stern, npc_old, npc_young
 
 
 @app.post("/api/tts")
 async def text_to_speech(req: TTSRequest):
-    """Convert text to natural speech using Google Cloud TTS."""
+    """Convert text to natural speech using Google Cloud TTS with multi-voice NPC support."""
     from google.cloud import texttospeech
 
     client = texttospeech.TextToSpeechClient()
 
-    # Voice profiles for different speaker types
+    # Diverse voice profiles for distinct NPC personalities
     voice_configs = {
         "narrator": {
-            "name": "en-US-Studio-Q",  # Deep, authoritative male
+            "name": "en-US-Studio-Q",
             "ssml_gender": texttospeech.SsmlVoiceGender.MALE,
+            "pitch": -2.0, "rate": 0.95,
+        },
+        "npc_gruff": {
+            "name": "en-US-Studio-J",
+            "ssml_gender": texttospeech.SsmlVoiceGender.MALE,
+            "pitch": -6.0, "rate": 0.85,
+        },
+        "npc_noble": {
+            "name": "en-GB-Studio-B",
+            "ssml_gender": texttospeech.SsmlVoiceGender.MALE,
+            "pitch": 0.0, "rate": 0.9,
+        },
+        "npc_mysterious": {
+            "name": "en-US-Studio-Q",
+            "ssml_gender": texttospeech.SsmlVoiceGender.MALE,
+            "pitch": -4.0, "rate": 0.8,
+        },
+        "npc_cheerful": {
+            "name": "en-US-Studio-O",
+            "ssml_gender": texttospeech.SsmlVoiceGender.MALE,
+            "pitch": 2.0, "rate": 1.05,
+        },
+        "npc_female_warm": {
+            "name": "en-US-Studio-O",
+            "ssml_gender": texttospeech.SsmlVoiceGender.FEMALE,
+            "pitch": 1.0, "rate": 0.95,
+        },
+        "npc_female_stern": {
+            "name": "en-GB-Studio-C",
+            "ssml_gender": texttospeech.SsmlVoiceGender.FEMALE,
+            "pitch": -2.0, "rate": 0.9,
+        },
+        "npc_old": {
+            "name": "en-US-Studio-J",
+            "ssml_gender": texttospeech.SsmlVoiceGender.MALE,
+            "pitch": -3.0, "rate": 0.8,
+        },
+        "npc_young": {
+            "name": "en-US-Studio-O",
+            "ssml_gender": texttospeech.SsmlVoiceGender.MALE,
+            "pitch": 3.0, "rate": 1.0,
         },
         "npc_male": {
-            "name": "en-US-Studio-O",  # Warm male
+            "name": "en-US-Studio-O",
             "ssml_gender": texttospeech.SsmlVoiceGender.MALE,
+            "pitch": 0.0, "rate": 0.95,
         },
         "npc_female": {
-            "name": "en-US-Studio-O",  # Will use female variant
+            "name": "en-US-Studio-O",
             "ssml_gender": texttospeech.SsmlVoiceGender.FEMALE,
+            "pitch": 0.0, "rate": 0.95,
         },
     }
 
     config = voice_configs.get(req.voice_type, voice_configs["narrator"])
+    pitch = config.get("pitch", 0.0)
+    rate = config.get("rate", 0.95)
 
-    # Use SSML for better prosody
-    ssml = f'<speak><prosody rate="95%" pitch="-2st">{req.text}</prosody></speak>'
-    if req.voice_type != "narrator":
-        ssml = f"<speak>{req.text}</speak>"
+    ssml = f'<speak><prosody rate="{int(rate * 100)}%" pitch="{pitch:+.0f}st">{req.text}</prosody></speak>'
 
     synthesis_input = texttospeech.SynthesisInput(ssml=ssml)
     voice = texttospeech.VoiceSelectionParams(

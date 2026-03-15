@@ -7,6 +7,7 @@ from typing import Any
 
 from game.models import (
     AbilityScores,
+    Achievement,
     Character,
     CharacterClass,
     CharacterRace,
@@ -14,10 +15,14 @@ from game.models import (
     Combatant,
     CombatPhase,
     CombatState,
+    Consequence,
     DramaLevel,
+    Faction,
     GameSession,
     Item,
+    ItemRarity,
     Location,
+    LoreEntry,
     NPC,
     Quest,
     StoryBeat,
@@ -402,9 +407,142 @@ class GameEngine:
         }
         return beat_drama.get(session.story_beat, 3)
 
+    def award_xp(self, session_id: str, xp: int) -> list[dict[str, Any]]:
+        """Award XP to all alive players. Returns level-up info for any who leveled."""
+        session = self.get_session(session_id)
+        if not session:
+            return []
+        level_ups = []
+        for p in session.get_alive_players():
+            leveled = p.add_xp(xp)
+            if leveled:
+                changes = p.level_up()
+                if changes:
+                    level_ups.append({"character": p.name, **changes})
+        return level_ups
+
+    def grant_achievement(
+        self, session_id: str, character_name: str, title: str, description: str = "", icon: str = ""
+    ) -> Achievement | None:
+        """Grant an achievement to a character."""
+        session = self.get_session(session_id)
+        if not session:
+            return None
+        for p in session.players:
+            if p.name.lower() == character_name.lower():
+                # Don't duplicate
+                if any(a.title == title for a in p.achievements):
+                    return None
+                achievement = Achievement(
+                    title=title, description=description, icon=icon, earned_by=character_name,
+                )
+                p.achievements.append(achievement)
+                return achievement
+        return None
+
+    def check_achievements(self, session: GameSession) -> list[Achievement]:
+        """Check and award automatic achievements based on stats."""
+        new_achievements = []
+        for p in session.players:
+            checks = [
+                (p.kills >= 1, "First Blood", "Defeated your first enemy", "🗡️"),
+                (p.kills >= 10, "Slayer", "Defeated 10 enemies", "⚔️"),
+                (p.kills >= 50, "Legend of War", "Defeated 50 enemies", "🏆"),
+                (p.crits >= 1, "Lucky Strike", "Rolled your first critical hit", "🎯"),
+                (p.crits >= 10, "Fortune's Favorite", "10 critical hits", "✨"),
+                (p.quests_completed >= 1, "Adventurer", "Completed your first quest", "📜"),
+                (p.quests_completed >= 5, "Questmaster", "Completed 5 quests", "🏅"),
+                (p.level >= 5, "Seasoned", "Reached level 5", "⭐"),
+                (p.level >= 10, "Veteran", "Reached level 10", "🌟"),
+                (p.deaths >= 1, "Death Defier", "Returned from death", "💀"),
+            ]
+            for condition, title, desc, icon in checks:
+                if condition and not any(a.title == title for a in p.achievements):
+                    a = Achievement(title=title, description=desc, icon=icon, earned_by=p.name)
+                    p.achievements.append(a)
+                    new_achievements.append(a)
+        return new_achievements
+
+    def add_faction(self, session_id: str, faction: Faction) -> bool:
+        session = self.get_session(session_id)
+        if not session:
+            return False
+        session.world.factions[faction.id] = faction
+        return True
+
+    def add_lore_entry(self, session_id: str, entry: LoreEntry) -> bool:
+        session = self.get_session(session_id)
+        if not session:
+            return False
+        session.world.lorebook.append(entry)
+        return True
+
+    def generate_session_recap(self, session: GameSession) -> str:
+        """Generate a recap of the session so far."""
+        events = session.get_recent_events(30)
+        if not events:
+            return "The adventure has just begun."
+
+        recap_parts = []
+        for e in events:
+            if e.event_type in ("narration", "player_action") and e.content:
+                recap_parts.append(e.content[:100])
+
+        player_status = ", ".join(
+            f"{p.name} (Lvl {p.level}, {p.hp}/{p.max_hp} HP)"
+            for p in session.players
+        )
+        active_quests = ", ".join(
+            q.title for q in session.world.quests if q.is_active and not q.is_complete
+        )
+
+        return (
+            f"Session recap for {session.world.campaign_name}:\n"
+            f"Party: {player_status}\n"
+            f"Location: {session.world.current_location_id}\n"
+            f"Day {session.world.day_count}, {session.world.time_of_day}\n"
+            f"Active quests: {active_quests or 'None'}\n"
+            f"Recent events: {' | '.join(recap_parts[-10:])}"
+        )
+
     def get_context_summary(self, session: GameSession) -> dict[str, Any]:
-        """Build a context summary for the AI agents."""
+        """Build a comprehensive context summary for the AI agents."""
         recent = session.get_recent_events(15)
+
+        # Find relevant lore based on recent events
+        recent_text = " ".join(e.content for e in recent if e.content)
+        relevant_lore = session.world.find_lore(recent_text)
+
+        # NPC memory summaries for NPCs in current location
+        npc_context = []
+        for n in session.world.npcs.values():
+            if n.location == session.world.current_location_id:
+                npc_context.append({
+                    "name": n.name,
+                    "relationship": n.relationship,
+                    "personality": n.personality,
+                    "voice_style": n.voice_style,
+                    "faction": n.faction,
+                    "memories": n.get_memory_summary(),
+                })
+
+        # Active consequences
+        active_consequences = [
+            {"trigger": c.trigger_event, "effect": c.effect, "severity": c.severity}
+            for c in session.world.consequences
+            if not c.resolved
+        ][-5:]
+
+        # Faction standings
+        faction_info = [
+            {
+                "name": f.name,
+                "reputation": {k: v for k, v in f.reputation.items()},
+                "description": f.description[:100],
+            }
+            for f in session.world.factions.values()
+        ]
+
         return {
             "campaign": session.world.campaign_name,
             "setting": session.world.setting_description,
@@ -422,19 +560,27 @@ class GameEngine:
                     "level": p.level,
                     "hp": p.hp,
                     "max_hp": p.max_hp,
+                    "xp": p.xp,
+                    "xp_to_next": p.xp_to_next_level,
                     "conditions": p.conditions,
+                    "backstory": p.backstory[:200] if p.backstory else "",
+                    "personality": p.personality[:100] if p.personality else "",
+                    "inventory_summary": [i.name for i in p.inventory[:5]],
+                    "spells": [s.name for s in p.spells],
                 }
                 for p in session.players
             ],
-            "npcs_present": [
-                {"name": n.name, "relationship": n.relationship}
-                for n in session.world.npcs.values()
-                if n.location == session.world.current_location_id
-            ],
+            "npcs_present": npc_context,
             "active_quests": [
-                {"title": q.title, "objectives": q.objectives}
+                {"title": q.title, "objectives": q.objectives, "description": q.description}
                 for q in session.world.quests
                 if q.is_active and not q.is_complete
+            ],
+            "factions": faction_info,
+            "active_consequences": active_consequences,
+            "relevant_lore": [
+                {"title": l.title, "content": l.content[:200]}
+                for l in relevant_lore[:3]
             ],
             "story_beat": session.story_beat.value,
             "combat_active": session.combat.is_active,
@@ -444,7 +590,20 @@ class GameEngine:
             ],
             "drama_level": self.calculate_drama_level(session),
             "style_sheet": session.style_sheet,
+            "weather_effects": _get_weather_effects(session.world.weather),
         }
+
+
+def _get_weather_effects(weather: str) -> dict[str, Any]:
+    """Get mechanical effects of current weather."""
+    effects = {
+        "clear": {"combat_modifier": 0, "description": "No weather effects"},
+        "rain": {"combat_modifier": -1, "description": "Disadvantage on ranged attacks, fire damage halved"},
+        "fog": {"combat_modifier": -2, "description": "Heavily obscured beyond 30ft, disadvantage on Perception"},
+        "snow": {"combat_modifier": -1, "description": "Difficult terrain, cold damage +1d4"},
+        "storm": {"combat_modifier": -3, "description": "Disadvantage on ranged & Perception, lightning risk"},
+    }
+    return effects.get(weather, effects["clear"])
 
 
 # Singleton

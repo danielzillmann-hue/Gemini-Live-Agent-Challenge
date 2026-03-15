@@ -14,12 +14,16 @@ from google.genai import types
 from config import settings
 from game.engine import CombatEngine, GameEngine, game_engine, roll_dice, roll_d20, create_character
 from game.models import (
+    Achievement,
     Character,
     CharacterClass,
     CharacterRace,
+    Faction,
     GameSession,
     GeneratedMedia,
+    Item,
     Location,
+    LoreEntry,
     MediaType,
     NPC,
     Quest,
@@ -226,6 +230,112 @@ def set_music_mood(
     }
 
 
+def award_experience(
+    session_id: str, xp_amount: int, reason: str = ""
+) -> dict[str, Any]:
+    """Award XP to all alive players for combat victory, quest completion, or clever actions."""
+    return {
+        "action": "award_xp",
+        "session_id": session_id,
+        "xp": xp_amount,
+        "reason": reason,
+    }
+
+
+def generate_loot(
+    session_id: str,
+    item_name: str,
+    item_type: str = "weapon",
+    rarity: str = "common",
+    description: str = "",
+    lore: str = "",
+    damage: str = "",
+    properties: str = "",
+) -> dict[str, Any]:
+    """Generate a unique loot item with AI-created name, description, and lore."""
+    return {
+        "action": "generate_loot",
+        "session_id": session_id,
+        "name": item_name,
+        "type": item_type,
+        "rarity": rarity,
+        "description": description,
+        "lore": lore,
+        "damage": damage,
+        "properties": properties,
+    }
+
+
+def record_npc_memory(
+    session_id: str,
+    npc_name: str,
+    event: str,
+    sentiment: int = 0,
+    character_involved: str = "",
+) -> dict[str, Any]:
+    """Record a memory for an NPC about an interaction with a player."""
+    return {
+        "action": "npc_memory",
+        "session_id": session_id,
+        "npc_name": npc_name,
+        "event": event,
+        "sentiment": sentiment,
+        "character": character_involved,
+    }
+
+
+def add_world_consequence(
+    session_id: str,
+    trigger: str,
+    effect: str,
+    severity: int = 3,
+) -> dict[str, Any]:
+    """Record a consequence of player actions that will ripple through the world."""
+    return {
+        "action": "add_consequence",
+        "session_id": session_id,
+        "trigger": trigger,
+        "effect": effect,
+        "severity": severity,
+    }
+
+
+def update_faction_reputation(
+    session_id: str,
+    faction_name: str,
+    character_name: str,
+    change: int = 0,
+    reason: str = "",
+) -> dict[str, Any]:
+    """Change a character's reputation with a faction."""
+    return {
+        "action": "faction_reputation",
+        "session_id": session_id,
+        "faction": faction_name,
+        "character": character_name,
+        "change": change,
+        "reason": reason,
+    }
+
+
+def add_lore_entry(
+    session_id: str,
+    title: str,
+    content: str,
+    keywords: list[str] | None = None,
+    category: str = "world",
+) -> dict[str, Any]:
+    """Add a new lorebook entry that will be injected into context when keywords match."""
+    return {
+        "action": "add_lore",
+        "session_id": session_id,
+        "title": title,
+        "content": content,
+        "keywords": keywords or [title.lower()],
+        "category": category,
+    }
+
+
 # ── Agent Definitions ─────────────────────────────────────────────────────
 
 GENESIS_SYSTEM_INSTRUCTION = """You are Genesis, the master AI Game Master orchestrating an immersive tabletop RPG experience.
@@ -269,11 +379,53 @@ DRAMA LEVEL GUIDE (for media decisions):
 7-8: Generate detailed illustration + consider video
 9-10: Full cinematic video treatment (boss fights, major reveals, deaths)
 
+CHARACTER PROGRESSION:
+- Award XP for combat victories (50-200 XP based on difficulty), quest completion (100-500 XP),
+  and clever/heroic actions (25-100 XP). Use the award_experience tool.
+- When a character levels up, narrate it dramatically — describe their growing power.
+
+NPC MEMORY & RELATIONSHIPS:
+- After significant NPC interactions, use record_npc_memory to save what happened.
+- NPCs remember past interactions. Check the "memories" field in npcs_present context.
+- NPCs should react differently based on relationship level and memories.
+
+CONSEQUENCES:
+- When players make major choices, use add_world_consequence to track the ripple effects.
+- Reference active consequences from context — they should affect the narrative.
+- Consequences create organic plot hooks and make the world feel reactive.
+
+FACTIONS:
+- Use update_faction_reputation when player actions affect a faction's view of them.
+- Factions influence quest availability, NPC behavior, and political dynamics.
+
+LOOT & ITEMS:
+- After combat or discoveries, use generate_loot to create unique items.
+- Items should have names, descriptions, and lore connected to the story.
+- Vary rarity: most loot is common/uncommon, rare+ should feel special.
+
+LOREBOOK:
+- When introducing important world details, use add_lore_entry to save them.
+- Keywords ensure the AI remembers these details in future scenes.
+
+WEATHER EFFECTS:
+- Weather affects combat mechanically (see weather_effects in context).
+- Narrate weather impacts — rain making roads muddy, fog obscuring vision.
+
+BACKSTORY INTEGRATION:
+- Read player backstories from context. Weave backstory elements into the narrative.
+- A character's lost family member might appear as an NPC. Their hometown might be mentioned.
+
+BOSS FIGHTS:
+- Boss encounters should have multiple phases (describe phase transitions dramatically).
+- Bosses should have unique mechanics — environmental hazards, minion spawns, vulnerability windows.
+- Use [CINEMATIC] tags for boss reveals and phase transitions.
+
 When starting a new session, always:
 1. Generate a world map
 2. Set the opening scene with an illustration
 3. Introduce the setting with dramatic narration
-4. Present an immediate hook to engage players"""
+4. Present an immediate hook to engage players
+5. Set initial music mood"""
 
 narrator_agent = Agent(
     model=settings.GEMINI_MODEL,
@@ -343,6 +495,12 @@ genesis_agent = Agent(
         FunctionTool(change_location),
         FunctionTool(update_world_state),
         FunctionTool(set_music_mood),
+        FunctionTool(award_experience),
+        FunctionTool(generate_loot),
+        FunctionTool(record_npc_memory),
+        FunctionTool(add_world_consequence),
+        FunctionTool(update_faction_reputation),
+        FunctionTool(add_lore_entry),
     ],
 )
 
@@ -773,5 +931,112 @@ async def process_tool_results(
                     "type": "music_change",
                     "data": args,
                 })
+
+            elif name == "award_xp":
+                xp_amount = args.get("xp", 0)
+                reason = args.get("reason", "")
+                level_ups = game_engine.award_xp(session_id, xp_amount)
+                ws_messages.append({
+                    "type": "xp_awarded",
+                    "data": {
+                        "xp": xp_amount,
+                        "reason": reason,
+                        "level_ups": level_ups,
+                    },
+                })
+                # Check for new achievements
+                session = game_engine.get_session(session_id)
+                if session:
+                    new_achievements = game_engine.check_achievements(session)
+                    for a in new_achievements:
+                        ws_messages.append({
+                            "type": "achievement",
+                            "data": a.model_dump(mode="json"),
+                        })
+
+            elif name == "generate_loot":
+                item = Item(
+                    name=args.get("name", "Mystery Item"),
+                    item_type=args.get("type", "misc"),
+                    rarity=args.get("rarity", "common"),
+                    description=args.get("description", ""),
+                    lore=args.get("lore", ""),
+                    properties={"damage": args.get("damage", "")} if args.get("damage") else {},
+                )
+                # Add to first alive player's inventory (or specified)
+                session = game_engine.get_session(session_id)
+                if session:
+                    target = session.get_alive_players()[0] if session.get_alive_players() else None
+                    if target:
+                        target.inventory.append(item)
+
+                ws_messages.append({
+                    "type": "loot_found",
+                    "data": {
+                        "item": item.model_dump(mode="json"),
+                    },
+                })
+
+            elif name == "record_npc_memory":
+                session = game_engine.get_session(session_id)
+                if session:
+                    npc_name = args.get("npc_name", "")
+                    for npc in session.world.npcs.values():
+                        if npc.name.lower() == npc_name.lower():
+                            npc.add_memory(
+                                event=args.get("event", ""),
+                                sentiment=args.get("sentiment", 0),
+                                character=args.get("character", ""),
+                            )
+                            break
+
+            elif name == "add_consequence":
+                session = game_engine.get_session(session_id)
+                if session:
+                    consequence = session.world.add_consequence(
+                        trigger=args.get("trigger", ""),
+                        effect=args.get("effect", ""),
+                        severity=args.get("severity", 3),
+                    )
+                    ws_messages.append({
+                        "type": "consequence",
+                        "data": {
+                            "trigger": consequence.trigger_event,
+                            "effect": consequence.effect,
+                            "severity": consequence.severity,
+                        },
+                    })
+
+            elif name == "faction_reputation":
+                session = game_engine.get_session(session_id)
+                if session:
+                    faction_name = args.get("faction", "")
+                    for faction in session.world.factions.values():
+                        if faction.name.lower() == faction_name.lower():
+                            new_rep = faction.adjust_reputation(
+                                args.get("character", ""),
+                                args.get("change", 0),
+                            )
+                            ws_messages.append({
+                                "type": "faction_update",
+                                "data": {
+                                    "faction": faction.name,
+                                    "character": args.get("character", ""),
+                                    "new_reputation": new_rep,
+                                    "reason": args.get("reason", ""),
+                                },
+                            })
+                            break
+
+            elif name == "add_lore":
+                session = game_engine.get_session(session_id)
+                if session:
+                    entry = LoreEntry(
+                        title=args.get("title", ""),
+                        content=args.get("content", ""),
+                        keywords=args.get("keywords", []),
+                        category=args.get("category", "world"),
+                    )
+                    game_engine.add_lore_entry(session_id, entry)
 
     return ws_messages

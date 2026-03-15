@@ -5,14 +5,28 @@ import { useGameStore } from "@/hooks/useGameStore";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-/**
- * NarratorVoice — reads narration and dialogue aloud using
- * Google Cloud Text-to-Speech (natural voice) with browser TTS fallback.
- */
+interface QueueEntry {
+  text: string;
+  voiceType: string;
+}
+
+// Map NPC voice_style to TTS voice type
+const VOICE_MAP: Record<string, string> = {
+  gruff: "npc_gruff",
+  noble: "npc_noble",
+  mysterious: "npc_mysterious",
+  cheerful: "npc_cheerful",
+  neutral: "npc_male",
+  warm: "npc_female_warm",
+  stern: "npc_female_stern",
+  old: "npc_old",
+  young: "npc_young",
+};
+
 export default function NarratorVoice() {
   const { storyLog, narratorVoiceEnabled } = useGameStore();
   const lastSpokenIndex = useRef(0);
-  const audioQueue = useRef<string[]>([]);
+  const audioQueue = useRef<QueueEntry[]>([]);
   const isPlaying = useRef(false);
   const currentAudio = useRef<HTMLAudioElement | null>(null);
 
@@ -22,8 +36,8 @@ export default function NarratorVoice() {
       .replace(/\[CINEMATIC\]/g, "")
       .replace(/\[NPC_INTRO:.*?\]/g, "")
       .replace(/\[COMBAT_START\]/g, "")
-      .replace(/```[\s\S]*?```/g, "") // Remove code blocks
-      .replace(/\{[\s\S]*?\}/g, "") // Remove JSON
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/\{[\s\S]*?\}/g, "")
       .trim();
   }
 
@@ -34,20 +48,18 @@ export default function NarratorVoice() {
     }
 
     isPlaying.current = true;
-    const text = audioQueue.current.shift()!;
+    const { text, voiceType } = audioQueue.current.shift()!;
 
     try {
-      // Try Cloud TTS first (natural voice)
       const res = await fetch(`${API_URL}/api/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice_type: "narrator" }),
+        body: JSON.stringify({ text, voice_type: voiceType }),
       });
 
       if (res.ok) {
         const data = await res.json();
         if (data.audio && !data.fallback) {
-          // Play the Cloud TTS audio
           const audio = new Audio(`data:audio/mp3;base64,${data.audio}`);
           currentAudio.current = audio;
           audio.onended = () => {
@@ -63,7 +75,7 @@ export default function NarratorVoice() {
         }
       }
     } catch {
-      // Cloud TTS unavailable, fall through to browser TTS
+      // Fall through to browser TTS
     }
 
     fallbackBrowserTTS(text);
@@ -80,7 +92,6 @@ export default function NarratorVoice() {
     utterance.pitch = 0.85;
     utterance.volume = 0.9;
 
-    // Pick best available voice
     const voices = window.speechSynthesis.getVoices();
     const preferred = voices.find(
       (v) => v.lang.startsWith("en") && /daniel|james|david|george/i.test(v.name)
@@ -92,7 +103,6 @@ export default function NarratorVoice() {
     window.speechSynthesis.speak(utterance);
   }
 
-  // Queue new narration entries
   useEffect(() => {
     if (!narratorVoiceEnabled) return;
 
@@ -105,7 +115,22 @@ export default function NarratorVoice() {
       const text = cleanText(entry.content);
       if (!text || text.length < 3) continue;
 
-      audioQueue.current.push(text);
+      // Determine voice based on entry type and speaker
+      let voiceType = "narrator";
+      if (entry.type === "dialogue" && entry.speaker) {
+        // Try to match NPC voice style from the store
+        const npcs = useGameStore.getState().npcs;
+        const npc = Object.values(npcs).find(
+          (n) => n.name.toLowerCase() === (entry.speaker || "").toLowerCase()
+        );
+        if (npc) {
+          voiceType = VOICE_MAP[npc.voice_style] || "npc_male";
+        } else {
+          voiceType = "npc_male";
+        }
+      }
+
+      audioQueue.current.push({ text, voiceType });
     }
 
     if (!isPlaying.current && audioQueue.current.length > 0) {
@@ -114,7 +139,6 @@ export default function NarratorVoice() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storyLog.length, narratorVoiceEnabled]);
 
-  // Stop everything when disabled
   useEffect(() => {
     if (!narratorVoiceEnabled) {
       audioQueue.current = [];
