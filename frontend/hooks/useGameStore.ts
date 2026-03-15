@@ -38,6 +38,9 @@ interface GameStore {
   musicIntensity: number;
   isMuted: boolean;
 
+  // Narration voice
+  narratorVoiceEnabled: boolean;
+
   // Actions
   setSession: (id: string, name: string, setting: string) => void;
   setConnected: (connected: boolean) => void;
@@ -54,6 +57,7 @@ interface GameStore {
   setWorldMap: (url: string) => void;
   setMusic: (mood: MusicMood, intensity: number) => void;
   toggleMute: () => void;
+  toggleNarratorVoice: () => void;
   addNPC: (npc: NPC) => void;
   updateQuests: (quests: Quest[]) => void;
   handleWSMessage: (msg: Record<string, unknown>) => void;
@@ -78,6 +82,7 @@ const initialState = {
   musicMood: "peaceful" as MusicMood,
   musicIntensity: 0.3,
   isMuted: false,
+  narratorVoiceEnabled: true,
 };
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -125,6 +130,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setMusic: (mood, intensity) => set({ musicMood: mood, musicIntensity: intensity }),
 
   toggleMute: () => set((state) => ({ isMuted: !state.isMuted })),
+
+  toggleNarratorVoice: () => set((state) => {
+    const newVal = !state.narratorVoiceEnabled;
+    // Stop any current speech when disabling
+    if (!newVal && typeof window !== "undefined") {
+      window.speechSynthesis?.cancel();
+    }
+    return { narratorVoiceEnabled: newVal };
+  }),
 
   addNPC: (npc) =>
     set((state) => ({

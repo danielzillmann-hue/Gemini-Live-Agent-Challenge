@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
-  Mic, MicOff, Send, Camera, CameraOff, Volume2, VolumeX,
+  Mic, MicOff, Send, Camera, CameraOff, Volume2, VolumeX, MessageSquare, MessageSquareOff,
   Swords, Map, BookOpen, Backpack, Users, Settings, Save,
 } from "lucide-react";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -19,6 +19,7 @@ import Inventory from "@/components/Inventory";
 import WorldMapPanel from "@/components/WorldMapPanel";
 import NPCJournal from "@/components/NPCJournal";
 import AudioManager from "@/components/AudioManager";
+import NarratorVoice from "@/components/NarratorVoice";
 import { api } from "@/lib/api";
 
 type SidePanel = "party" | "quests" | "inventory" | "map" | "npcs" | null;
@@ -36,7 +37,7 @@ export default function GamePage() {
   const {
     isConnected, isThinking, players, combat, storyLog,
     musicMood, isMuted, toggleMute, worldMapUrl, npcs,
-    world,
+    world, narratorVoiceEnabled, toggleNarratorVoice,
   } = useGameStore();
 
   const { send } = useWebSocket(sessionId);
@@ -128,6 +129,7 @@ export default function GamePage() {
   return (
     <div className="h-screen w-screen flex flex-col bg-genesis-bg overflow-hidden">
       <AudioManager />
+      <NarratorVoice />
       {/* ── Top Bar ──────────────────────────────────────────── */}
       <header className="h-12 flex items-center justify-between px-4 border-b border-genesis-border bg-genesis-panel/80 backdrop-blur-sm shrink-0">
         <div className="flex items-center gap-3">
@@ -286,11 +288,28 @@ export default function GamePage() {
           <Send className="w-4.5 h-4.5" />
         </button>
 
-        {/* Mute */}
+        {/* Narrator Voice Toggle */}
+        <button
+          onClick={toggleNarratorVoice}
+          className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+            narratorVoiceEnabled
+              ? "bg-genesis-accent/20 text-genesis-accent border border-genesis-accent/50"
+              : "bg-genesis-bg text-genesis-text-dim hover:text-genesis-accent border border-genesis-border"
+          }`}
+          title={narratorVoiceEnabled ? "Disable narrator voice" : "Enable narrator voice"}
+        >
+          {narratorVoiceEnabled
+            ? <MessageSquare className="w-4.5 h-4.5" />
+            : <MessageSquareOff className="w-4.5 h-4.5" />
+          }
+        </button>
+
+        {/* Mute Music */}
         <button
           onClick={toggleMute}
           className="w-10 h-10 rounded-lg bg-genesis-bg text-genesis-text-dim
                      hover:text-genesis-accent border border-genesis-border flex items-center justify-center transition-colors"
+          title={isMuted ? "Unmute music" : "Mute music"}
         >
           {isMuted ? <VolumeX className="w-4.5 h-4.5" /> : <Volume2 className="w-4.5 h-4.5" />}
         </button>
