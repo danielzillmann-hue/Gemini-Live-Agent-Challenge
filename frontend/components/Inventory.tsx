@@ -77,9 +77,9 @@ export default function Inventory() {
                           Equipped
                         </span>
                       )}
-                      {item.properties?.damage && (
+                      {item.properties?.damage != null && (
                         <span className="ml-1.5 text-genesis-text-dim text-[10px] font-mono">
-                          {item.properties.damage as string}
+                          {String(item.properties.damage)}
                         </span>
                       )}
                     </div>
