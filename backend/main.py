@@ -230,6 +230,64 @@ async def list_campaigns():
     return [c.model_dump(mode="json") for c in campaigns]
 
 
+class TTSRequest(BaseModel):
+    text: str
+    voice_type: str = "narrator"  # narrator, npc_male, npc_female
+
+
+@app.post("/api/tts")
+async def text_to_speech(req: TTSRequest):
+    """Convert text to natural speech using Google Cloud TTS."""
+    from google.cloud import texttospeech
+
+    client = texttospeech.TextToSpeechClient()
+
+    # Voice profiles for different speaker types
+    voice_configs = {
+        "narrator": {
+            "name": "en-US-Studio-Q",  # Deep, authoritative male
+            "ssml_gender": texttospeech.SsmlVoiceGender.MALE,
+        },
+        "npc_male": {
+            "name": "en-US-Studio-O",  # Warm male
+            "ssml_gender": texttospeech.SsmlVoiceGender.MALE,
+        },
+        "npc_female": {
+            "name": "en-US-Studio-O",  # Will use female variant
+            "ssml_gender": texttospeech.SsmlVoiceGender.FEMALE,
+        },
+    }
+
+    config = voice_configs.get(req.voice_type, voice_configs["narrator"])
+
+    # Use SSML for better prosody
+    ssml = f'<speak><prosody rate="95%" pitch="-2st">{req.text}</prosody></speak>'
+    if req.voice_type != "narrator":
+        ssml = f"<speak>{req.text}</speak>"
+
+    synthesis_input = texttospeech.SynthesisInput(ssml=ssml)
+    voice = texttospeech.VoiceSelectionParams(
+        language_code="en-US",
+        name=config["name"],
+        ssml_gender=config["ssml_gender"],
+    )
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3,
+        speaking_rate=0.95,
+        pitch=-1.0 if req.voice_type == "narrator" else 0.0,
+    )
+
+    try:
+        response = client.synthesize_speech(
+            input=synthesis_input, voice=voice, audio_config=audio_config
+        )
+        audio_b64 = base64.b64encode(response.audio_content).decode()
+        return {"audio": audio_b64, "format": "mp3"}
+    except Exception:
+        logger.warning("TTS generation failed, falling back to browser TTS")
+        return {"audio": "", "format": "none", "fallback": True}
+
+
 # ── WebSocket Game Loop ───────────────────────────────────────────────────
 
 @app.websocket("/ws/{session_id}")
