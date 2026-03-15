@@ -1,0 +1,138 @@
+@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1e1e2e #0a0a0f;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: #0a0a0f;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #1e1e2e;
+    border-radius: 3px;
+  }
+
+  body {
+    @apply bg-genesis-bg text-genesis-text font-body;
+    overflow: hidden;
+  }
+}
+
+@layer components {
+  .genesis-panel {
+    @apply bg-genesis-panel border border-genesis-border rounded-lg;
+    background: linear-gradient(135deg, #12121a 0%, #0e0e16 100%);
+  }
+
+  .genesis-panel-header {
+    @apply px-4 py-2 border-b border-genesis-border font-display text-genesis-accent text-sm tracking-widest uppercase;
+  }
+
+  .genesis-button {
+    @apply px-4 py-2 bg-genesis-accent text-genesis-bg font-display text-sm tracking-wider uppercase
+           rounded hover:bg-genesis-accent-dim transition-colors duration-200 font-semibold;
+  }
+
+  .genesis-button-secondary {
+    @apply px-4 py-2 border border-genesis-accent text-genesis-accent font-display text-sm tracking-wider uppercase
+           rounded hover:bg-genesis-accent/10 transition-colors duration-200;
+  }
+
+  .genesis-input {
+    @apply w-full bg-genesis-bg border border-genesis-border rounded px-4 py-2.5
+           text-genesis-text placeholder-genesis-text-dim focus:outline-none
+           focus:border-genesis-accent transition-colors duration-200;
+  }
+
+  .genesis-select {
+    @apply genesis-input appearance-none cursor-pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b6b80' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 36px;
+  }
+
+  .hp-bar {
+    @apply h-2 rounded-full transition-all duration-500 ease-out;
+    background: linear-gradient(90deg, #c44040, #40c463);
+  }
+
+  .hp-bar-critical {
+    background: linear-gradient(90deg, #c44040, #c44040);
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  .narration-text {
+    @apply text-genesis-text leading-relaxed;
+    text-shadow: 0 0 10px rgba(201, 168, 76, 0.05);
+  }
+
+  .dialogue-text {
+    @apply text-genesis-accent italic;
+  }
+
+  .dice-roll {
+    @apply inline-flex items-center justify-center w-10 h-10 rounded-lg
+           bg-genesis-accent text-genesis-bg font-display font-bold text-lg;
+    box-shadow: 0 0 15px rgba(201, 168, 76, 0.4);
+  }
+
+  .dice-roll-crit {
+    @apply dice-roll;
+    animation: glow 0.5s ease-in-out infinite alternate;
+    box-shadow: 0 0 25px rgba(201, 168, 76, 0.8);
+  }
+
+  .combat-initiative-active {
+    @apply border-l-2 border-genesis-accent bg-genesis-accent/5;
+  }
+
+  .scene-image-container {
+    @apply relative w-full overflow-hidden rounded-lg;
+    aspect-ratio: 16 / 9;
+  }
+
+  .video-player-overlay {
+    @apply absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm;
+  }
+
+  .loading-dots::after {
+    content: "";
+    animation: dots 1.5s steps(3, end) infinite;
+  }
+
+  @keyframes dots {
+    0% { content: ""; }
+    33% { content: "."; }
+    66% { content: ".."; }
+    100% { content: "..."; }
+  }
+
+  .thinking-indicator {
+    @apply flex gap-1 items-center text-genesis-text-dim text-sm;
+  }
+
+  .thinking-indicator .dot {
+    @apply w-1.5 h-1.5 rounded-full bg-genesis-accent;
+    animation: thinking 1.4s ease-in-out infinite;
+  }
+
+  .thinking-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes thinking {
+    0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
+  }
+}

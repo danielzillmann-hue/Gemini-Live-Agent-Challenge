@@ -1,0 +1,298 @@
+"use client";
+
+import { useEffect, useState, useRef } from "react";
+import { useParams } from "next/navigation";
+import { motion } from "framer-motion";
+import {
+  Mic, MicOff, Send, Camera, CameraOff, Volume2, VolumeX,
+  Swords, Map, BookOpen, Backpack, Users, Settings, Save,
+} from "lucide-react";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { useVoice } from "@/hooks/useVoice";
+import { useGameStore } from "@/hooks/useGameStore";
+import MainStage from "@/components/MainStage";
+import NarrativeLog from "@/components/NarrativeLog";
+import PartyPanel from "@/components/PartyPanel";
+import CombatTracker from "@/components/CombatTracker";
+import QuestLog from "@/components/QuestLog";
+import Inventory from "@/components/Inventory";
+import WorldMapPanel from "@/components/WorldMapPanel";
+import NPCJournal from "@/components/NPCJournal";
+import { api } from "@/lib/api";
+
+type SidePanel = "party" | "quests" | "inventory" | "map" | "npcs" | null;
+
+export default function GamePage() {
+  const params = useParams();
+  const sessionId = params.sessionId as string;
+  const [input, setInput] = useState("");
+  const [sidePanel, setSidePanel] = useState<SidePanel>("party");
+  const [cameraActive, setCameraActive] = useState(false);
+  const [gameStarted, setGameStarted] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const {
+    isConnected, isThinking, players, combat, storyLog,
+    musicMood, isMuted, toggleMute, worldMapUrl, npcs,
+    world,
+  } = useGameStore();
+
+  const { send } = useWebSocket(sessionId);
+
+  const { isListening, toggleListening } = useVoice({
+    onTranscript: (text) => {
+      send("player_action", { text, character_name: players[0]?.name || "Player" });
+    },
+  });
+
+  // Start game once connected and not yet started
+  useEffect(() => {
+    if (isConnected && !gameStarted && players.length > 0) {
+      send("start_game", {});
+      setGameStarted(true);
+    }
+  }, [isConnected, gameStarted, players.length, send]);
+
+  function handleSendMessage() {
+    const text = input.trim();
+    if (!text) return;
+    send("player_action", { text, character_name: players[0]?.name || "Player" });
+    useGameStore.getState().addStoryEntry({
+      type: "action",
+      content: text,
+      speaker: players[0]?.name || "Player",
+    });
+    setInput("");
+    inputRef.current?.focus();
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  }
+
+  async function toggleCamera() {
+    if (cameraActive) {
+      const stream = videoRef.current?.srcObject as MediaStream;
+      stream?.getTracks().forEach((t) => t.stop());
+      if (videoRef.current) videoRef.current.srcObject = null;
+      setCameraActive(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) videoRef.current.srcObject = stream;
+        setCameraActive(true);
+
+        // Send frames periodically for dice detection
+        const interval = setInterval(() => {
+          if (!videoRef.current || !cameraActive) {
+            clearInterval(interval);
+            return;
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = videoRef.current.videoWidth;
+          canvas.height = videoRef.current.videoHeight;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(videoRef.current, 0, 0);
+            const frame = canvas.toDataURL("image/jpeg", 0.5).split(",")[1];
+            send("camera_frame", {
+              frame,
+              purpose: "dice_detection",
+              character_name: players[0]?.name || "Player",
+            });
+          }
+        }, 3000);
+      } catch {
+        console.error("Camera access denied");
+      }
+    }
+  }
+
+  async function handleSave() {
+    try {
+      await api.saveSession(sessionId);
+      useGameStore.getState().addStoryEntry({
+        type: "system",
+        content: "Game saved successfully.",
+      });
+    } catch {
+      console.error("Failed to save");
+    }
+  }
+
+  return (
+    <div className="h-screen w-screen flex flex-col bg-genesis-bg overflow-hidden">
+      {/* ── Top Bar ──────────────────────────────────────────── */}
+      <header className="h-12 flex items-center justify-between px-4 border-b border-genesis-border bg-genesis-panel/80 backdrop-blur-sm shrink-0">
+        <div className="flex items-center gap-3">
+          <h1 className="font-display text-genesis-accent text-sm tracking-[0.2em]">GENESIS</h1>
+          <div className="w-px h-5 bg-genesis-border" />
+          <span className="text-genesis-text text-sm font-display tracking-wider">
+            {world?.campaign_name || "Loading..."}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-genesis-text-dim text-xs">
+          {world && (
+            <>
+              <span>Day {world.day_count}</span>
+              <span className="opacity-40">|</span>
+              <span className="capitalize">{world.time_of_day}</span>
+              <span className="opacity-40">|</span>
+              <span className="capitalize">{world.weather}</span>
+              <span className="opacity-40">|</span>
+            </>
+          )}
+          <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-genesis-green" : "bg-genesis-red"}`} />
+          <span>{isConnected ? "Connected" : "Disconnected"}</span>
+          <button onClick={handleSave} className="ml-3 p-1.5 hover:text-genesis-accent transition-colors" title="Save Game">
+            <Save className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      {/* ── Main Layout ──────────────────────────────────────── */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Sidebar — Panel Switcher */}
+        <nav className="w-12 flex flex-col items-center py-3 gap-1 border-r border-genesis-border bg-genesis-panel/50 shrink-0">
+          {[
+            { id: "party" as SidePanel, icon: Users, label: "Party" },
+            { id: "quests" as SidePanel, icon: BookOpen, label: "Quests" },
+            { id: "inventory" as SidePanel, icon: Backpack, label: "Inventory" },
+            { id: "map" as SidePanel, icon: Map, label: "World Map" },
+            { id: "npcs" as SidePanel, icon: Swords, label: "NPCs" },
+          ].map(({ id, icon: Icon, label }) => (
+            <button
+              key={id}
+              onClick={() => setSidePanel(sidePanel === id ? null : id)}
+              className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                sidePanel === id
+                  ? "bg-genesis-accent/10 text-genesis-accent"
+                  : "text-genesis-text-dim hover:text-genesis-text hover:bg-genesis-bg/50"
+              }`}
+              title={label}
+            >
+              <Icon className="w-4.5 h-4.5" />
+            </button>
+          ))}
+        </nav>
+
+        {/* Side Panel Content */}
+        {sidePanel && (
+          <motion.aside
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 280, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            className="border-r border-genesis-border bg-genesis-panel/30 overflow-y-auto shrink-0"
+          >
+            {sidePanel === "party" && <PartyPanel />}
+            {sidePanel === "quests" && <QuestLog />}
+            {sidePanel === "inventory" && <Inventory />}
+            {sidePanel === "map" && <WorldMapPanel />}
+            {sidePanel === "npcs" && <NPCJournal />}
+          </motion.aside>
+        )}
+
+        {/* Center — Main Stage + Narrative */}
+        <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Main Stage (Scene Image / Video / Battle Map) */}
+          <div className="h-[45%] shrink-0 p-3 pb-0">
+            <MainStage />
+          </div>
+
+          {/* Narrative Log */}
+          <div className="flex-1 overflow-hidden p-3 pt-2">
+            <NarrativeLog />
+          </div>
+        </main>
+
+        {/* Right Panel — Combat Tracker (when active) */}
+        {combat?.is_active && (
+          <motion.aside
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 260, opacity: 1 }}
+            className="border-l border-genesis-border bg-genesis-panel/30 overflow-y-auto shrink-0"
+          >
+            <CombatTracker />
+          </motion.aside>
+        )}
+      </div>
+
+      {/* ── Input Bar ────────────────────────────────────────── */}
+      <footer className="h-16 flex items-center gap-3 px-4 border-t border-genesis-border bg-genesis-panel/80 backdrop-blur-sm shrink-0">
+        {/* Voice */}
+        <button
+          onClick={toggleListening}
+          className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+            isListening
+              ? "bg-genesis-red text-white animate-pulse"
+              : "bg-genesis-bg text-genesis-text-dim hover:text-genesis-accent border border-genesis-border"
+          }`}
+          title={isListening ? "Stop listening" : "Start voice input"}
+        >
+          {isListening ? <MicOff className="w-4.5 h-4.5" /> : <Mic className="w-4.5 h-4.5" />}
+        </button>
+
+        {/* Camera */}
+        <button
+          onClick={toggleCamera}
+          className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+            cameraActive
+              ? "bg-genesis-blue text-white"
+              : "bg-genesis-bg text-genesis-text-dim hover:text-genesis-accent border border-genesis-border"
+          }`}
+          title={cameraActive ? "Disable camera" : "Enable camera (dice detection)"}
+        >
+          {cameraActive ? <CameraOff className="w-4.5 h-4.5" /> : <Camera className="w-4.5 h-4.5" />}
+        </button>
+
+        {/* Hidden video element for camera */}
+        <video ref={videoRef} autoPlay playsInline className="hidden" />
+
+        {/* Text Input */}
+        <div className="flex-1 relative">
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              isThinking
+                ? "The Game Master is narrating..."
+                : "Describe your action... (press Enter to send)"
+            }
+            disabled={isThinking}
+            className="genesis-input pr-12 disabled:opacity-50"
+          />
+          {isThinking && (
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 thinking-indicator">
+              <span className="dot" /><span className="dot" /><span className="dot" />
+            </div>
+          )}
+        </div>
+
+        {/* Send */}
+        <button
+          onClick={handleSendMessage}
+          disabled={!input.trim() || isThinking}
+          className="w-10 h-10 rounded-lg bg-genesis-accent text-genesis-bg flex items-center justify-center
+                     disabled:opacity-30 disabled:cursor-not-allowed hover:bg-genesis-accent-dim transition-colors"
+        >
+          <Send className="w-4.5 h-4.5" />
+        </button>
+
+        {/* Mute */}
+        <button
+          onClick={toggleMute}
+          className="w-10 h-10 rounded-lg bg-genesis-bg text-genesis-text-dim
+                     hover:text-genesis-accent border border-genesis-border flex items-center justify-center transition-colors"
+        >
+          {isMuted ? <VolumeX className="w-4.5 h-4.5" /> : <Volume2 className="w-4.5 h-4.5" />}
+        </button>
+      </footer>
+    </div>
+  );
+}
