@@ -1,4 +1,4 @@
-"""Genesis ADK Orchestrator — coordinates all sub-agents for the game session."""
+"""Genesis ADK Orchestrator — agent definitions, runner, and event processing."""
 
 from __future__ import annotations
 
@@ -12,331 +12,27 @@ from google.adk.tools import FunctionTool
 from google.genai import types
 
 from config import settings
-from game.engine import CombatEngine, GameEngine, game_engine, roll_dice, roll_d20, create_character
-from game.models import (
-    Achievement,
-    Character,
-    CharacterClass,
-    CharacterRace,
-    Faction,
-    GameSession,
-    GeneratedMedia,
-    Item,
-    Location,
-    LoreEntry,
-    MediaType,
-    NPC,
-    Quest,
-    StoryEvent,
+from agents.prompts import (
+    NARRATOR_INSTRUCTION,
+    RULES_INSTRUCTION,
+    ART_DIRECTOR_INSTRUCTION,
+    WORLD_KEEPER_INSTRUCTION,
 )
-from services import gemini_service, media_service, storage_service
+from agents.tools import (
+    narrate_scene, generate_scene_art, generate_cinematic_video, set_music_mood,
+    roll_check, start_combat_encounter, resolve_combat_action,
+    create_npc, update_quest, change_location, update_world_state,
+    award_experience, generate_loot, record_npc_memory,
+    add_world_consequence, update_faction_reputation, add_lore_entry,
+)
+from agents.tool_handlers import TOOL_HANDLERS
+from game.engine import game_engine
+from game.models import GameSession
 
 logger = logging.getLogger(__name__)
 
 
-# ── Tool Functions (exposed to ADK agents) ────────────────────────────────
-
-def narrate_scene(
-    session_id: str, scene_description: str, mood: str = "neutral"
-) -> dict[str, Any]:
-    """Generate narration for a scene transition or story beat."""
-    return {
-        "action": "narrate",
-        "session_id": session_id,
-        "scene": scene_description,
-        "mood": mood,
-    }
-
-
-def generate_scene_art(
-    session_id: str,
-    scene_description: str,
-    characters_present: list[str] | None = None,
-    camera_angle: str = "wide",
-) -> dict[str, Any]:
-    """Request scene illustration generation."""
-    return {
-        "action": "generate_image",
-        "session_id": session_id,
-        "description": scene_description,
-        "characters": characters_present or [],
-        "camera": camera_angle,
-    }
-
-
-def generate_cinematic_video(
-    session_id: str,
-    scene_description: str,
-    mood: str = "epic",
-    duration_seconds: int = 5,
-) -> dict[str, Any]:
-    """Request cinematic video generation for dramatic moments."""
-    return {
-        "action": "generate_video",
-        "session_id": session_id,
-        "description": scene_description,
-        "mood": mood,
-        "duration": duration_seconds,
-    }
-
-
-def roll_check(
-    character_name: str,
-    ability: str,
-    difficulty_class: int = 10,
-    advantage: bool = False,
-    disadvantage: bool = False,
-) -> dict[str, Any]:
-    """Roll an ability check for a character."""
-    total, raw = roll_d20()
-    if advantage:
-        total2, raw2 = roll_d20()
-        if total2 > total:
-            total, raw = total2, raw2
-    elif disadvantage:
-        total2, raw2 = roll_d20()
-        if total2 < total:
-            total, raw = total2, raw2
-
-    success = total >= difficulty_class
-    is_crit = raw == 20
-    is_fumble = raw == 1
-
-    return {
-        "character": character_name,
-        "ability": ability,
-        "roll": raw,
-        "total": total,
-        "dc": difficulty_class,
-        "success": success,
-        "critical_success": is_crit,
-        "critical_failure": is_fumble,
-    }
-
-
-def start_combat_encounter(
-    session_id: str,
-    enemy_names: list[str],
-    enemy_descriptions: list[str],
-    challenge_rating: float = 1.0,
-) -> dict[str, Any]:
-    """Initiate a combat encounter."""
-    return {
-        "action": "start_combat",
-        "session_id": session_id,
-        "enemies": [
-            {"name": n, "description": d, "cr": challenge_rating}
-            for n, d in zip(enemy_names, enemy_descriptions)
-        ],
-    }
-
-
-def resolve_combat_action(
-    session_id: str,
-    attacker_name: str,
-    action_type: str,
-    target_name: str = "",
-    weapon_or_spell: str = "",
-) -> dict[str, Any]:
-    """Resolve a combat action (attack, spell, ability, etc.)."""
-    return {
-        "action": "combat_action",
-        "session_id": session_id,
-        "attacker": attacker_name,
-        "type": action_type,
-        "target": target_name,
-        "weapon_or_spell": weapon_or_spell,
-    }
-
-
-def create_npc(
-    session_id: str,
-    name: str,
-    description: str,
-    personality: str,
-    voice_style: str = "neutral",
-    is_hostile: bool = False,
-) -> dict[str, Any]:
-    """Create a new NPC in the world."""
-    return {
-        "action": "create_npc",
-        "session_id": session_id,
-        "name": name,
-        "description": description,
-        "personality": personality,
-        "voice_style": voice_style,
-        "is_hostile": is_hostile,
-    }
-
-
-def update_quest(
-    session_id: str,
-    quest_title: str,
-    update_type: str = "progress",
-    details: str = "",
-) -> dict[str, Any]:
-    """Update quest state — progress, complete, or add new quest."""
-    return {
-        "action": "quest_update",
-        "session_id": session_id,
-        "quest": quest_title,
-        "update": update_type,
-        "details": details,
-    }
-
-
-def change_location(
-    session_id: str,
-    location_name: str,
-    location_description: str,
-    location_type: str = "generic",
-) -> dict[str, Any]:
-    """Move the party to a new location."""
-    return {
-        "action": "change_location",
-        "session_id": session_id,
-        "name": location_name,
-        "description": location_description,
-        "type": location_type,
-    }
-
-
-def update_world_state(
-    session_id: str,
-    time_of_day: str = "",
-    weather: str = "",
-    advance_day: bool = False,
-    world_event: str = "",
-) -> dict[str, Any]:
-    """Update world state — time, weather, global events."""
-    return {
-        "action": "world_update",
-        "session_id": session_id,
-        "time_of_day": time_of_day,
-        "weather": weather,
-        "advance_day": advance_day,
-        "event": world_event,
-    }
-
-
-def set_music_mood(
-    mood: str, intensity: float = 0.5
-) -> dict[str, Any]:
-    """Change the background music mood and intensity."""
-    return {
-        "action": "music_change",
-        "mood": mood,
-        "intensity": min(1.0, max(0.0, intensity)),
-    }
-
-
-def award_experience(
-    session_id: str, xp_amount: int, reason: str = ""
-) -> dict[str, Any]:
-    """Award XP to all alive players for combat victory, quest completion, or clever actions."""
-    return {
-        "action": "award_xp",
-        "session_id": session_id,
-        "xp": xp_amount,
-        "reason": reason,
-    }
-
-
-def generate_loot(
-    session_id: str,
-    item_name: str,
-    item_type: str = "weapon",
-    rarity: str = "common",
-    description: str = "",
-    lore: str = "",
-    damage: str = "",
-    properties: str = "",
-) -> dict[str, Any]:
-    """Generate a unique loot item with AI-created name, description, and lore."""
-    return {
-        "action": "generate_loot",
-        "session_id": session_id,
-        "name": item_name,
-        "type": item_type,
-        "rarity": rarity,
-        "description": description,
-        "lore": lore,
-        "damage": damage,
-        "properties": properties,
-    }
-
-
-def record_npc_memory(
-    session_id: str,
-    npc_name: str,
-    event: str,
-    sentiment: int = 0,
-    character_involved: str = "",
-) -> dict[str, Any]:
-    """Record a memory for an NPC about an interaction with a player."""
-    return {
-        "action": "npc_memory",
-        "session_id": session_id,
-        "npc_name": npc_name,
-        "event": event,
-        "sentiment": sentiment,
-        "character": character_involved,
-    }
-
-
-def add_world_consequence(
-    session_id: str,
-    trigger: str,
-    effect: str,
-    severity: int = 3,
-) -> dict[str, Any]:
-    """Record a consequence of player actions that will ripple through the world."""
-    return {
-        "action": "add_consequence",
-        "session_id": session_id,
-        "trigger": trigger,
-        "effect": effect,
-        "severity": severity,
-    }
-
-
-def update_faction_reputation(
-    session_id: str,
-    faction_name: str,
-    character_name: str,
-    change: int = 0,
-    reason: str = "",
-) -> dict[str, Any]:
-    """Change a character's reputation with a faction."""
-    return {
-        "action": "faction_reputation",
-        "session_id": session_id,
-        "faction": faction_name,
-        "character": character_name,
-        "change": change,
-        "reason": reason,
-    }
-
-
-def add_lore_entry(
-    session_id: str,
-    title: str,
-    content: str,
-    keywords: list[str] | None = None,
-    category: str = "world",
-) -> dict[str, Any]:
-    """Add a new lorebook entry that will be injected into context when keywords match."""
-    return {
-        "action": "add_lore",
-        "session_id": session_id,
-        "title": title,
-        "content": content,
-        "keywords": keywords or [title.lower()],
-        "category": category,
-    }
-
-
-# ── Agent Definitions ─────────────────────────────────────────────────────
+# ── System Instruction ────────────────────────────────────────────────────
 
 GENESIS_SYSTEM_INSTRUCTION = """You are Genesis, the master AI Game Master orchestrating an immersive tabletop RPG experience.
 
@@ -367,22 +63,16 @@ WORKFLOW FOR EACH PLAYER INPUT:
 1. Understand what the player is trying to do
 2. Determine if a dice roll is needed (uncertain outcomes only)
 3. Narrate the result with vivid description
-4. Generate art if this is a visually significant moment (new scene, dramatic action, NPC introduction)
+4. Generate art if this is a visually significant moment
 5. Generate video only for peak dramatic moments (drama level 7+)
 6. Update world state, quests, and NPCs as needed
 7. Set appropriate music mood
 8. End with a natural prompt for the next action
 
-DRAMA LEVEL GUIDE (for media decisions):
-1-3: Text narration only, maybe ambient scene image
-4-6: Generate scene illustration
-7-8: Generate detailed illustration + consider video
-9-10: Full cinematic video treatment (boss fights, major reveals, deaths)
-
 CHARACTER PROGRESSION:
-- Award XP for combat victories (50-200 XP based on difficulty), quest completion (100-500 XP),
+- Award XP for combat victories (50-200 XP), quest completion (100-500 XP),
   and clever/heroic actions (25-100 XP). Use the award_experience tool.
-- When a character levels up, narrate it dramatically — describe their growing power.
+- When a character levels up, narrate it dramatically.
 
 NPC MEMORY & RELATIONSHIPS:
 - After significant NPC interactions, use record_npc_memory to save what happened.
@@ -392,32 +82,25 @@ NPC MEMORY & RELATIONSHIPS:
 CONSEQUENCES:
 - When players make major choices, use add_world_consequence to track the ripple effects.
 - Reference active consequences from context — they should affect the narrative.
-- Consequences create organic plot hooks and make the world feel reactive.
 
 FACTIONS:
 - Use update_faction_reputation when player actions affect a faction's view of them.
-- Factions influence quest availability, NPC behavior, and political dynamics.
 
 LOOT & ITEMS:
 - After combat or discoveries, use generate_loot to create unique items.
 - Items should have names, descriptions, and lore connected to the story.
-- Vary rarity: most loot is common/uncommon, rare+ should feel special.
 
 LOREBOOK:
 - When introducing important world details, use add_lore_entry to save them.
-- Keywords ensure the AI remembers these details in future scenes.
 
 WEATHER EFFECTS:
 - Weather affects combat mechanically (see weather_effects in context).
-- Narrate weather impacts — rain making roads muddy, fog obscuring vision.
 
 BACKSTORY INTEGRATION:
 - Read player backstories from context. Weave backstory elements into the narrative.
-- A character's lost family member might appear as an NPC. Their hometown might be mentioned.
 
 BOSS FIGHTS:
-- Boss encounters should have multiple phases (describe phase transitions dramatically).
-- Bosses should have unique mechanics — environmental hazards, minion spawns, vulnerability windows.
+- Boss encounters should have multiple phases with unique mechanics.
 - Use [CINEMATIC] tags for boss reveals and phase transitions.
 
 When starting a new session, always:
@@ -427,55 +110,41 @@ When starting a new session, always:
 4. Present an immediate hook to engage players
 5. Set initial music mood"""
 
+
+# ── Agent Definitions ─────────────────────────────────────────────────────
+
 narrator_agent = Agent(
     model=settings.GEMINI_MODEL,
     name="narrator",
     description="Handles all storytelling, narration, and NPC dialogue",
-    instruction=gemini_service.NARRATOR_SYSTEM_INSTRUCTION,
-    tools=[
-        FunctionTool(narrate_scene),
-        FunctionTool(set_music_mood),
-    ],
+    instruction=NARRATOR_INSTRUCTION,
+    tools=[FunctionTool(narrate_scene), FunctionTool(set_music_mood)],
 )
 
 rules_agent = Agent(
     model=settings.GEMINI_FLASH_MODEL,
     name="rules",
     description="Manages game mechanics, dice rolls, combat, and character stats",
-    instruction=gemini_service.RULES_SYSTEM_INSTRUCTION,
-    tools=[
-        FunctionTool(roll_check),
-        FunctionTool(start_combat_encounter),
-        FunctionTool(resolve_combat_action),
-    ],
+    instruction=RULES_INSTRUCTION,
+    tools=[FunctionTool(roll_check), FunctionTool(start_combat_encounter), FunctionTool(resolve_combat_action)],
 )
 
 art_director_agent = Agent(
     model=settings.GEMINI_FLASH_MODEL,
     name="art_director",
     description="Generates scene illustrations, portraits, and battle maps",
-    instruction=gemini_service.ART_DIRECTOR_SYSTEM_INSTRUCTION,
-    tools=[
-        FunctionTool(generate_scene_art),
-        FunctionTool(generate_cinematic_video),
-    ],
+    instruction=ART_DIRECTOR_INSTRUCTION,
+    tools=[FunctionTool(generate_scene_art), FunctionTool(generate_cinematic_video)],
 )
 
 world_keeper_agent = Agent(
     model=settings.GEMINI_FLASH_MODEL,
     name="world_keeper",
     description="Manages NPCs, quests, locations, and world state",
-    instruction=gemini_service.WORLD_KEEPER_SYSTEM_INSTRUCTION,
-    tools=[
-        FunctionTool(create_npc),
-        FunctionTool(update_quest),
-        FunctionTool(change_location),
-        FunctionTool(update_world_state),
-    ],
+    instruction=WORLD_KEEPER_INSTRUCTION,
+    tools=[FunctionTool(create_npc), FunctionTool(update_quest),
+           FunctionTool(change_location), FunctionTool(update_world_state)],
 )
-
-
-# ── Master Orchestrator ───────────────────────────────────────────────────
 
 genesis_agent = Agent(
     model=settings.GEMINI_MODEL,
@@ -484,22 +153,14 @@ genesis_agent = Agent(
     instruction=GENESIS_SYSTEM_INSTRUCTION,
     sub_agents=[narrator_agent, rules_agent, art_director_agent, world_keeper_agent],
     tools=[
-        FunctionTool(narrate_scene),
-        FunctionTool(generate_scene_art),
-        FunctionTool(generate_cinematic_video),
-        FunctionTool(roll_check),
-        FunctionTool(start_combat_encounter),
-        FunctionTool(resolve_combat_action),
-        FunctionTool(create_npc),
-        FunctionTool(update_quest),
-        FunctionTool(change_location),
-        FunctionTool(update_world_state),
-        FunctionTool(set_music_mood),
-        FunctionTool(award_experience),
-        FunctionTool(generate_loot),
-        FunctionTool(record_npc_memory),
-        FunctionTool(add_world_consequence),
-        FunctionTool(update_faction_reputation),
+        FunctionTool(narrate_scene), FunctionTool(generate_scene_art),
+        FunctionTool(generate_cinematic_video), FunctionTool(roll_check),
+        FunctionTool(start_combat_encounter), FunctionTool(resolve_combat_action),
+        FunctionTool(create_npc), FunctionTool(update_quest),
+        FunctionTool(change_location), FunctionTool(update_world_state),
+        FunctionTool(set_music_mood), FunctionTool(award_experience),
+        FunctionTool(generate_loot), FunctionTool(record_npc_memory),
+        FunctionTool(add_world_consequence), FunctionTool(update_faction_reputation),
         FunctionTool(add_lore_entry),
     ],
 )
@@ -515,25 +176,19 @@ runner = Runner(
     session_service=session_service,
 )
 
-
 _created_sessions: set[str] = set()
 
 
 async def _ensure_session(session_id: str) -> None:
-    """Create an ADK session if it doesn't exist yet."""
     if session_id not in _created_sessions:
         await session_service.create_session(
-            app_name="genesis_rpg",
-            user_id="player",
-            session_id=session_id,
+            app_name="genesis_rpg", user_id="player", session_id=session_id,
         )
         _created_sessions.add(session_id)
 
 
 async def process_player_input(
-    session_id: str,
-    player_input: str,
-    game_context: dict[str, Any],
+    session_id: str, player_input: str, game_context: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Process player input through the ADK agent pipeline.
 
@@ -554,45 +209,30 @@ async def process_player_input(
     events: list[dict[str, Any]] = []
 
     async for event in runner.run_async(
-        user_id="player",
-        session_id=session_id,
-        new_message=content,
+        user_id="player", session_id=session_id, new_message=content,
     ):
         if event.is_final_response():
             if event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text:
                         text = part.text.strip()
-                        # Filter out raw JSON responses from sub-agents
-                        # that leaked through without narration
+                        # Filter raw JSON from sub-agents
                         if text.startswith("{") or text.startswith("```"):
                             try:
                                 cleaned = text.strip("`").strip()
                                 if cleaned.startswith("json"):
                                     cleaned = cleaned[4:].strip()
                                 parsed = json.loads(cleaned)
-                                # Extract narration hint if present
                                 hint = parsed.get("narration_hint", "")
                                 if hint:
-                                    events.append({
-                                        "type": "narration",
-                                        "content": hint,
-                                    })
-                                # Also emit as tool result
+                                    events.append({"type": "narration", "content": hint})
                                 action = parsed.get("action", "")
                                 if action:
-                                    events.append({
-                                        "type": "tool_call",
-                                        "name": action,
-                                        "args": parsed.get("details", parsed),
-                                    })
+                                    events.append({"type": "tool_call", "name": action, "args": parsed.get("details", parsed)})
                                 continue
                             except (json.JSONDecodeError, AttributeError):
-                                pass  # Not JSON, treat as narration
-                        events.append({
-                            "type": "narration",
-                            "content": text,
-                        })
+                                pass
+                        events.append({"type": "narration", "content": text})
                     if part.function_call:
                         events.append({
                             "type": "tool_call",
@@ -604,439 +244,34 @@ async def process_player_input(
 
 
 async def process_tool_results(
-    session_id: str,
-    tool_events: list[dict[str, Any]],
-    game_session: GameSession,
+    session_id: str, tool_events: list[dict[str, Any]], game_session: GameSession,
 ) -> list[dict[str, Any]]:
-    """Process tool call results and generate media as needed.
+    """Process tool call results using the handler registry.
 
-    Takes the raw tool events from the agent and executes the actual
-    media generation, state updates, etc.
-
-    Returns WebSocket messages to send to the frontend.
+    Each handler is a focused function in tool_handlers.py.
     """
     ws_messages: list[dict[str, Any]] = []
 
     for event in tool_events:
         if event["type"] == "narration":
-            ws_messages.append({
-                "type": "narration",
-                "data": {"content": event["content"]},
-            })
+            ws_messages.append({"type": "narration", "data": {"content": event["content"]}})
 
         elif event["type"] == "tool_call":
             name = event["name"]
             args = event.get("args", {})
 
-            if name == "generate_scene_art":
-                session = game_engine.get_session(session_id)
-                if session:
-                    image_bytes = await media_service.generate_scene_image(
-                        scene_description=args.get("description", ""),
-                        characters=args.get("characters"),
-                        time_of_day=session.world.time_of_day,
-                        weather=session.world.weather,
-                        camera_angle=args.get("camera", "wide"),
-                    )
-                    if image_bytes:
-                        url = await storage_service.upload_media(
-                            image_bytes, "image", "image/png", session_id
-                        )
-                        ws_messages.append({
-                            "type": "scene_image",
-                            "data": {"url": url, "description": args.get("description", "")},
-                        })
-
-            elif name == "generate_cinematic_video":
-                video_bytes = await media_service.generate_cinematic(
-                    scene_description=args.get("description", ""),
-                    mood=args.get("mood", "epic"),
-                )
-                if video_bytes:
-                    url = await storage_service.upload_media(
-                        video_bytes, "video", "video/mp4", session_id
-                    )
-                    ws_messages.append({
-                        "type": "scene_video",
-                        "data": {"url": url, "description": args.get("description", "")},
-                    })
-
-            elif name == "narrate_scene":
-                # Narrate scene tool — emit as narration
-                scene_desc = args.get("scene", "")
-                if scene_desc:
-                    ws_messages.append({
-                        "type": "narration",
-                        "data": {"content": scene_desc},
-                    })
-
-            elif name in ("roll_check", "skill_check"):
-                # Apply dice roll results to character state
-                session = game_engine.get_session(session_id)
-                if session and not args.get("success", True):
-                    # On failed save/check, apply damage if specified
-                    damage = args.get("damage", 0)
-                    if damage:
-                        char_name = args.get("character", "")
-                        for p in session.players:
-                            if p.name.lower() == char_name.lower():
-                                p.hp = max(0, p.hp - damage)
-                                break
-                ws_messages.append({
-                    "type": "dice_result",
-                    "data": args,
-                })
-
-            elif name == "start_combat_encounter":
-                # Actually start combat in the game engine
-                session = game_engine.get_session(session_id)
-                if session:
-                    enemies_data = args.get("enemies", [])
-                    for enemy in enemies_data:
-                        npc = NPC(
-                            name=enemy.get("name", "Enemy"),
-                            description=enemy.get("description", ""),
-                            is_hostile=True,
-                            hp=int(10 + enemy.get("cr", 1) * 8),
-                            max_hp=int(10 + enemy.get("cr", 1) * 8),
-                            armor_class=int(10 + enemy.get("cr", 1) * 2),
-                            challenge_rating=enemy.get("cr", 1.0),
-                        )
-                        game_engine.add_npc(session_id, npc)
-
-                    enemy_ids = [
-                        nid for nid, n in session.world.npcs.items()
-                        if n.is_hostile and n.hp > 0
-                    ]
-                    combat_state = game_engine.start_combat(session_id, enemy_ids)
-                    if combat_state:
-                        ws_messages.append({
-                            "type": "combat_update",
-                            "data": combat_state.model_dump(mode="json"),
-                        })
-                        # Generate battle map
-                        try:
-                            map_bytes = await media_service.generate_battle_map(
-                                location_description=args.get("description", session.world.setting_description),
-                            )
-                            if map_bytes:
-                                map_url = await storage_service.upload_media(
-                                    map_bytes, "image", "image/png", session_id
-                                )
-                                ws_messages.append({
-                                    "type": "battle_map",
-                                    "data": {"url": map_url},
-                                })
-                        except Exception:
-                            logger.warning("Battle map generation failed")
-
-            elif name == "resolve_combat_action":
-                # Actually resolve combat through the engine
-                session = game_engine.get_session(session_id)
-                if session and session.combat.is_active:
-                    attacker_name = args.get("attacker", "")
-                    target_name = args.get("target", "")
-                    action_type = args.get("type", "attack")
-
-                    attacker = next(
-                        (c for c in session.combat.combatants if c.name.lower() == attacker_name.lower()), None
-                    )
-                    defender = next(
-                        (c for c in session.combat.combatants if c.name.lower() == target_name.lower()), None
-                    )
-
-                    if attacker and defender and action_type == "attack":
-                        result = CombatEngine.resolve_attack(attacker, defender)
-                        # Sync HP back to player/NPC models
-                        for p in session.players:
-                            matching = next((c for c in session.combat.combatants if c.id == p.id), None)
-                            if matching:
-                                p.hp = matching.hp
-                        for npc in session.world.npcs.values():
-                            matching = next((c for c in session.combat.combatants if c.id == npc.id), None)
-                            if matching:
-                                npc.hp = matching.hp
-
-                        ws_messages.append({
-                            "type": "dice_result",
-                            "data": {
-                                "character": result.actor_name,
-                                "roll_type": "d20",
-                                "value": result.roll,
-                                "is_critical": result.is_critical,
-                                "is_fumble": result.is_miss and result.roll == 1,
-                            },
-                        })
-                        ws_messages.append({
-                            "type": "combat_update",
-                            "data": session.combat.model_dump(mode="json"),
-                        })
-
-                    # Advance turn
-                    next_combatant = CombatEngine.next_turn(session.combat)
-                    if not session.combat.is_active:
-                        ws_messages.append({
-                            "type": "combat_update",
-                            "data": {"is_active": False, "phase": "ended"},
-                        })
-                else:
-                    ws_messages.append({
-                        "type": "combat_update",
-                        "data": {"action": "resolve", **args},
-                    })
-
-            elif name == "create_npc":
-                # Create NPC in game engine AND generate portrait
-                npc = NPC(
-                    name=args.get("name", ""),
-                    description=args.get("description", ""),
-                    personality=args.get("personality", ""),
-                    voice_style=args.get("voice_style", "neutral"),
-                    is_hostile=args.get("is_hostile", False),
-                    location=game_session.world.current_location_id,
-                )
-                game_engine.add_npc(session_id, npc)
-
-                portrait_url = ""
+            handler = TOOL_HANDLERS.get(name)
+            if handler:
                 try:
-                    portrait_bytes = await media_service.generate_character_portrait(
-                        name=args.get("name", ""),
-                        race="human",
-                        character_class="commoner",
-                        appearance=args.get("description", ""),
-                    )
-                    if portrait_bytes:
-                        portrait_url = await storage_service.upload_media(
-                            portrait_bytes, "image", "image/png", session_id
-                        )
-                        npc.portrait_url = portrait_url
+                    results = await handler(session_id, args, game_session)
+                    # Handle sync lambdas (music_change)
+                    if not hasattr(results, '__await__') and isinstance(results, list):
+                        ws_messages.extend(results)
+                    else:
+                        ws_messages.extend(results)
                 except Exception:
-                    logger.warning("NPC portrait generation failed for %s", args.get("name"))
-
-                ws_messages.append({
-                    "type": "npc_portrait",
-                    "data": {
-                        "id": npc.id,
-                        "name": npc.name,
-                        "portrait_url": portrait_url,
-                        "description": npc.description,
-                        "personality": npc.personality,
-                    },
-                })
-
-            elif name == "change_location":
-                # Update backend state
-                loc = Location(
-                    name=args.get("name", ""),
-                    description=args.get("description", ""),
-                    location_type=args.get("type", "generic"),
-                    visited=True,
-                )
-                game_engine.add_location(session_id, loc)
-                game_engine.move_to_location(session_id, loc.id)
-
-                # Generate scene image
-                scene_url = ""
-                try:
-                    scene_bytes = await media_service.generate_scene_image(
-                        scene_description=args.get("description", ""),
-                        time_of_day=game_session.world.time_of_day,
-                        weather=game_session.world.weather,
-                    )
-                    if scene_bytes:
-                        scene_url = await storage_service.upload_media(
-                            scene_bytes, "image", "image/png", session_id
-                        )
-                        loc.image_url = scene_url
-                except Exception:
-                    logger.warning("Location scene generation failed")
-
-                ws_messages.append({
-                    "type": "location_change",
-                    "data": {
-                        "name": loc.name,
-                        "description": loc.description,
-                        "image_url": scene_url,
-                        "location_id": loc.id,
-                    },
-                })
-
-            elif name == "update_quest":
-                # Update quest state in backend
-                session = game_engine.get_session(session_id)
-                if session:
-                    quest_title = args.get("quest", "")
-                    update_type = args.get("update", "progress")
-                    details = args.get("details", "")
-
-                    existing = next(
-                        (q for q in session.world.quests if q.title.lower() == quest_title.lower()),
-                        None,
-                    )
-                    if existing:
-                        if update_type == "complete":
-                            existing.is_complete = True
-                            existing.is_active = False
-                            # Award rewards
-                            for p in session.players:
-                                p.xp += existing.reward_xp
-                                p.gold += existing.reward_gold
-                        elif update_type == "progress" and details:
-                            # Mark next objective complete
-                            for i, obj in enumerate(existing.objectives):
-                                if i not in existing.completed_objectives:
-                                    existing.completed_objectives.append(i)
-                                    break
-                    elif update_type == "new" or not existing:
-                        # Create new quest
-                        new_quest = Quest(
-                            title=quest_title,
-                            description=details,
-                            objectives=[details] if details else [],
-                        )
-                        game_engine.add_quest(session_id, new_quest)
-
-                ws_messages.append({
-                    "type": "quest_update",
-                    "data": {
-                        **args,
-                        "quests": [q.model_dump(mode="json") for q in session.world.quests] if session else [],
-                    },
-                })
-
-            elif name == "update_world_state":
-                # Actually update backend world state
-                session = game_engine.get_session(session_id)
-                if session:
-                    if args.get("time_of_day"):
-                        session.world.time_of_day = args["time_of_day"]
-                    if args.get("weather"):
-                        session.world.weather = args["weather"]
-                    if args.get("advance_day"):
-                        session.world.day_count += 1
-                    if args.get("event"):
-                        session.world.global_events.append(args["event"])
-
-                ws_messages.append({
-                    "type": "world_update",
-                    "data": {
-                        "time_of_day": session.world.time_of_day if session else "",
-                        "weather": session.world.weather if session else "",
-                        "day_count": session.world.day_count if session else 1,
-                    },
-                })
-
-            elif name == "set_music_mood":
-                ws_messages.append({
-                    "type": "music_change",
-                    "data": args,
-                })
-
-            elif name == "award_xp":
-                xp_amount = args.get("xp", 0)
-                reason = args.get("reason", "")
-                level_ups = game_engine.award_xp(session_id, xp_amount)
-                ws_messages.append({
-                    "type": "xp_awarded",
-                    "data": {
-                        "xp": xp_amount,
-                        "reason": reason,
-                        "level_ups": level_ups,
-                    },
-                })
-                # Check for new achievements
-                session = game_engine.get_session(session_id)
-                if session:
-                    new_achievements = game_engine.check_achievements(session)
-                    for a in new_achievements:
-                        ws_messages.append({
-                            "type": "achievement",
-                            "data": a.model_dump(mode="json"),
-                        })
-
-            elif name == "generate_loot":
-                item = Item(
-                    name=args.get("name", "Mystery Item"),
-                    item_type=args.get("type", "misc"),
-                    rarity=args.get("rarity", "common"),
-                    description=args.get("description", ""),
-                    lore=args.get("lore", ""),
-                    properties={"damage": args.get("damage", "")} if args.get("damage") else {},
-                )
-                # Add to first alive player's inventory (or specified)
-                session = game_engine.get_session(session_id)
-                if session:
-                    target = session.get_alive_players()[0] if session.get_alive_players() else None
-                    if target:
-                        target.inventory.append(item)
-
-                ws_messages.append({
-                    "type": "loot_found",
-                    "data": {
-                        "item": item.model_dump(mode="json"),
-                    },
-                })
-
-            elif name == "record_npc_memory":
-                session = game_engine.get_session(session_id)
-                if session:
-                    npc_name = args.get("npc_name", "")
-                    for npc in session.world.npcs.values():
-                        if npc.name.lower() == npc_name.lower():
-                            npc.add_memory(
-                                event=args.get("event", ""),
-                                sentiment=args.get("sentiment", 0),
-                                character=args.get("character", ""),
-                            )
-                            break
-
-            elif name == "add_consequence":
-                session = game_engine.get_session(session_id)
-                if session:
-                    consequence = session.world.add_consequence(
-                        trigger=args.get("trigger", ""),
-                        effect=args.get("effect", ""),
-                        severity=args.get("severity", 3),
-                    )
-                    ws_messages.append({
-                        "type": "consequence",
-                        "data": {
-                            "trigger": consequence.trigger_event,
-                            "effect": consequence.effect,
-                            "severity": consequence.severity,
-                        },
-                    })
-
-            elif name == "faction_reputation":
-                session = game_engine.get_session(session_id)
-                if session:
-                    faction_name = args.get("faction", "")
-                    for faction in session.world.factions.values():
-                        if faction.name.lower() == faction_name.lower():
-                            new_rep = faction.adjust_reputation(
-                                args.get("character", ""),
-                                args.get("change", 0),
-                            )
-                            ws_messages.append({
-                                "type": "faction_update",
-                                "data": {
-                                    "faction": faction.name,
-                                    "character": args.get("character", ""),
-                                    "new_reputation": new_rep,
-                                    "reason": args.get("reason", ""),
-                                },
-                            })
-                            break
-
-            elif name == "add_lore":
-                session = game_engine.get_session(session_id)
-                if session:
-                    entry = LoreEntry(
-                        title=args.get("title", ""),
-                        content=args.get("content", ""),
-                        keywords=args.get("keywords", []),
-                        category=args.get("category", "world"),
-                    )
-                    game_engine.add_lore_entry(session_id, entry)
+                    logger.exception("Tool handler failed for %s", name)
+            else:
+                logger.warning("No handler for tool: %s", name)
 
     return ws_messages
