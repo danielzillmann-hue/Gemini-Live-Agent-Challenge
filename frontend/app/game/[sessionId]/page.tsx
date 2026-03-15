@@ -31,8 +31,10 @@ export default function GamePage() {
   const [sidePanel, setSidePanel] = useState<SidePanel>("party");
   const [cameraActive, setCameraActive] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
+  const [myCharacterName, setMyCharacterName] = useState<string>("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const {
     isConnected, isThinking, players, combat, storyLog,
@@ -45,9 +47,16 @@ export default function GamePage() {
 
   const { isListening, toggleListening } = useVoice({
     onTranscript: (text) => {
-      send("player_action", { text, character_name: players[0]?.name || "Player" });
+      send("player_action", { text, character_name: myCharacterName || players[0]?.name || "Player" });
     },
   });
+
+  // Auto-select character name (last added, likely "mine")
+  useEffect(() => {
+    if (players.length > 0 && !myCharacterName) {
+      setMyCharacterName(players[players.length - 1].name);
+    }
+  }, [players, myCharacterName]);
 
   // Start game once connected and not yet started
   useEffect(() => {
@@ -60,11 +69,11 @@ export default function GamePage() {
   function handleSendMessage() {
     const text = input.trim();
     if (!text) return;
-    send("player_action", { text, character_name: players[0]?.name || "Player" });
+    send("player_action", { text, character_name: myCharacterName || players[0]?.name || "Player" });
     useGameStore.getState().addStoryEntry({
       type: "action",
       content: text,
-      speaker: players[0]?.name || "Player",
+      speaker: myCharacterName || players[0]?.name || "Player",
     });
     setInput("");
     inputRef.current?.focus();
@@ -79,6 +88,7 @@ export default function GamePage() {
 
   async function toggleCamera() {
     if (cameraActive) {
+      if (cameraIntervalRef.current) clearInterval(cameraIntervalRef.current);
       const stream = videoRef.current?.srcObject as MediaStream;
       stream?.getTracks().forEach((t) => t.stop());
       if (videoRef.current) videoRef.current.srcObject = null;
@@ -90,22 +100,19 @@ export default function GamePage() {
         setCameraActive(true);
 
         // Send frames periodically for dice detection
-        const interval = setInterval(() => {
-          if (!videoRef.current || !cameraActive) {
-            clearInterval(interval);
-            return;
-          }
+        cameraIntervalRef.current = setInterval(() => {
+          if (!videoRef.current) return;
           const canvas = document.createElement("canvas");
           canvas.width = videoRef.current.videoWidth;
           canvas.height = videoRef.current.videoHeight;
           const ctx = canvas.getContext("2d");
-          if (ctx) {
+          if (ctx && canvas.width > 0) {
             ctx.drawImage(videoRef.current, 0, 0);
-            const frame = canvas.toDataURL("image/jpeg", 0.5).split(",")[1];
+            const frame = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
             send("camera_frame", {
               frame,
               purpose: "dice_detection",
-              character_name: players[0]?.name || "Player",
+              character_name: myCharacterName || players[0]?.name || "Player",
             });
           }
         }, 3000);

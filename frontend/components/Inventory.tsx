@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Backpack, Sword, Shield, FlaskConical, Scroll, Package, Coins } from "lucide-react";
 import { useGameStore } from "@/hooks/useGameStore";
 
@@ -13,7 +14,8 @@ const TYPE_ICONS: Record<string, typeof Sword> = {
 
 export default function Inventory() {
   const { players } = useGameStore();
-  const activePlayer = players[0]; // Primary player
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const activePlayer = players[selectedIdx] || players[0];
 
   if (!activePlayer) {
     return (
@@ -41,8 +43,27 @@ export default function Inventory() {
     <div className="h-full flex flex-col">
       <div className="genesis-panel-header flex items-center gap-2">
         <Backpack className="w-4 h-4" />
-        <span>{activePlayer.name}&apos;s Inventory</span>
+        <span>Inventory</span>
       </div>
+
+      {/* Player selector (multiplayer) */}
+      {players.length > 1 && (
+        <div className="flex gap-1 px-3 pt-2">
+          {players.map((p, i) => (
+            <button
+              key={p.id}
+              onClick={() => setSelectedIdx(i)}
+              className={`px-2 py-1 text-[10px] rounded tracking-wider uppercase font-display ${
+                i === selectedIdx
+                  ? "bg-genesis-accent/20 text-genesis-accent"
+                  : "text-genesis-text-dim hover:text-genesis-text"
+              }`}
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {/* Gold */}

@@ -252,27 +252,29 @@ class CombatEngine:
 
     @staticmethod
     def next_turn(combat: CombatState) -> Combatant | None:
-        alive = [c for c in combat.combatants if c.hp > 0]
-        if not alive:
+        # Keep only alive combatants
+        combat.combatants = [c for c in combat.combatants if c.hp > 0]
+
+        if not combat.combatants:
             combat.is_active = False
             combat.phase = CombatPhase.ENDED
             return None
 
-        combat.combatants = [c for c in combat.combatants if c.hp > 0]
+        # Check victory/defeat conditions
+        players_alive = any(c.is_player for c in combat.combatants)
+        enemies_alive = any(not c.is_player for c in combat.combatants)
+        if not players_alive or not enemies_alive:
+            combat.is_active = False
+            combat.phase = CombatPhase.ENDED
+            return None
 
+        # Advance turn safely
         combat.current_turn_index = (combat.current_turn_index + 1) % len(combat.combatants)
         if combat.current_turn_index == 0:
             combat.round_number += 1
 
         current = combat.combatants[combat.current_turn_index]
         combat.phase = CombatPhase.PLAYER_TURN if current.is_player else CombatPhase.ENEMY_TURN
-
-        players_alive = any(c.hp > 0 and c.is_player for c in combat.combatants)
-        enemies_alive = any(c.hp > 0 and not c.is_player for c in combat.combatants)
-        if not players_alive or not enemies_alive:
-            combat.is_active = False
-            combat.phase = CombatPhase.ENDED
-
         return current
 
     @staticmethod

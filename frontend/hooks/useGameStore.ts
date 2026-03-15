@@ -215,11 +215,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       case "npc_portrait":
         store.addNPC({
-          id: generateId(),
+          id: (data.id as string) || generateId(),
           name: data.name as string,
           description: data.description as string,
-          personality: data.personality as string,
-          portrait_url: data.portrait_url as string,
+          personality: (data.personality as string) || "",
+          portrait_url: (data.portrait_url as string) || "",
           voice_style: "neutral",
           location: "",
           is_hostile: false,
@@ -270,6 +270,28 @@ export const useGameStore = create<GameStore>((set, get) => ({
         if (data.image_url) {
           store.setSceneImage(data.image_url as string);
         }
+        // Sync location to world state
+        if (store.world && data.location_id) {
+          const updatedLocations = { ...store.world.locations };
+          updatedLocations[data.location_id as string] = {
+            id: data.location_id as string,
+            name: data.name as string,
+            description: (data.description as string) || "",
+            location_type: "generic",
+            image_url: (data.image_url as string) || "",
+            connected_locations: [],
+            visited: true,
+            x: 0,
+            y: 0,
+          };
+          set({
+            world: {
+              ...store.world,
+              locations: updatedLocations,
+              current_location_id: data.location_id as string,
+            },
+          });
+        }
         store.addStoryEntry({
           type: "system",
           content: `Arrived at ${data.name as string}`,
@@ -294,6 +316,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         if (data.players) store.setPlayers(data.players as Character[]);
         if (data.world) store.setWorld(data.world as unknown as WorldState);
         if (data.combat) store.setCombat(data.combat as unknown as CombatState);
+        if (data.npcs) set({ npcs: data.npcs as Record<string, NPC> });
+        if (data.quests && store.world) {
+          store.updateQuests(data.quests as Quest[]);
+        }
         break;
 
       case "players_online":

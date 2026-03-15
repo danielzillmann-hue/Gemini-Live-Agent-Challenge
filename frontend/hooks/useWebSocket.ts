@@ -2,10 +2,12 @@ import { useEffect, useRef, useCallback } from "react";
 import { useGameStore } from "./useGameStore";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080";
+const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
 
 export function useWebSocket(sessionId: string | null) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const reconnectAttempts = useRef(0);
   const { setConnected, handleWSMessage } = useGameStore();
 
   const connect = useCallback(() => {
@@ -16,6 +18,7 @@ export function useWebSocket(sessionId: string | null) {
 
     ws.onopen = () => {
       setConnected(true);
+      reconnectAttempts.current = 0; // Reset on successful connection
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
       }
@@ -32,10 +35,15 @@ export function useWebSocket(sessionId: string | null) {
 
     ws.onclose = () => {
       setConnected(false);
-      // Auto-reconnect after 3 seconds
+      // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s max
+      const delay = Math.min(
+        1000 * Math.pow(2, reconnectAttempts.current),
+        MAX_RECONNECT_DELAY
+      );
+      reconnectAttempts.current += 1;
       reconnectTimer.current = setTimeout(() => {
         connect();
-      }, 3000);
+      }, delay);
     };
 
     ws.onerror = () => {

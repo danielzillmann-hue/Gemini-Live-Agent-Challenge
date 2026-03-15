@@ -38,10 +38,13 @@ async def save_session(session: GameSession) -> None:
 
 async def load_session(session_id: str) -> GameSession | None:
     """Load a game session by ID."""
-    db = _get_client()
-    doc = await db.collection("sessions").document(session_id).get()
-    if doc.exists:
-        return GameSession.model_validate(doc.to_dict())
+    try:
+        db = _get_client()
+        doc = await db.collection("sessions").document(session_id).get()
+        if doc.exists:
+            return GameSession.model_validate(doc.to_dict())
+    except Exception:
+        logger.exception("Failed to load session %s from Firestore", session_id)
     return None
 
 

@@ -342,21 +342,24 @@ async def _handle_player_action(
                     _generate_scene_from_narration(session_id, session, clean_content)
                 )
 
-    # Send updated game state
+    # Send full updated game state (players, world, combat, NPCs, quests)
     await manager.broadcast(session_id, {
         "type": "game_state_sync",
         "data": {
             "combat": session.combat.model_dump(mode="json"),
-            "world": {
-                "time_of_day": session.world.time_of_day,
-                "weather": session.world.weather,
-                "day_count": session.world.day_count,
-                "current_location_id": session.world.current_location_id,
-            },
+            "world": session.world.model_dump(mode="json"),
             "players": [p.model_dump(mode="json") for p in session.players],
-            "quests": [q.model_dump(mode="json") for q in session.world.quests if q.is_active],
+            "npcs": {nid: n.model_dump(mode="json") for nid, n in session.world.npcs.items()},
+            "quests": [q.model_dump(mode="json") for q in session.world.quests],
         },
     })
+
+    # Auto-save to Firestore periodically (every 5 events)
+    if len(session.story_events) % 5 == 0:
+        try:
+            await firestore_service.save_session(session)
+        except Exception:
+            logger.warning("Auto-save failed for session %s", session_id)
 
 
 async def _handle_voice_input(

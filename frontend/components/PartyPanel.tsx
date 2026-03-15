@@ -1,8 +1,13 @@
 "use client";
 
-import { User, Heart, Shield, Sparkles } from "lucide-react";
+import { User, Heart, Shield, Sparkles, Skull, Wand2 } from "lucide-react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { cn, getHpColor, getHpPercentage } from "@/lib/utils";
+
+function modifier(score: number): string {
+  const mod = Math.floor((score - 10) / 2);
+  return mod >= 0 ? `+${mod}` : `${mod}`;
+}
 
 export default function PartyPanel() {
   const { players } = useGameStore();
@@ -14,29 +19,48 @@ export default function PartyPanel() {
         {players.map((char) => {
           const hpPct = getHpPercentage(char.hp, char.max_hp);
           const hpColor = getHpColor(char.hp, char.max_hp);
+          const isDead = char.hp <= 0;
 
           return (
-            <div key={char.id} className="genesis-panel p-3 space-y-2">
+            <div
+              key={char.id}
+              className={cn("genesis-panel p-3 space-y-2", isDead && "opacity-50")}
+            >
               {/* Header */}
               <div className="flex items-center gap-2.5">
                 {char.portrait_url ? (
                   <img
                     src={char.portrait_url}
                     alt={char.name}
-                    className="w-12 h-12 rounded-lg object-cover border border-genesis-border"
+                    className={cn(
+                      "w-12 h-12 rounded-lg object-cover border border-genesis-border",
+                      isDead && "grayscale"
+                    )}
                   />
                 ) : (
                   <div className="w-12 h-12 rounded-lg bg-genesis-bg flex items-center justify-center border border-genesis-border">
-                    <User className="w-5 h-5 text-genesis-text-dim" />
+                    {isDead ? (
+                      <Skull className="w-5 h-5 text-genesis-red" />
+                    ) : (
+                      <User className="w-5 h-5 text-genesis-text-dim" />
+                    )}
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="font-display text-genesis-text text-sm tracking-wider truncate">
+                  <div className={cn(
+                    "font-display text-sm tracking-wider truncate",
+                    isDead ? "text-genesis-red line-through" : "text-genesis-text"
+                  )}>
                     {char.name}
                   </div>
                   <div className="text-genesis-text-dim text-xs capitalize">
                     Lvl {char.level} {char.race} {char.character_class}
                   </div>
+                  {isDead && (
+                    <div className="text-genesis-red text-[10px] tracking-wider uppercase font-display">
+                      Fallen
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -46,13 +70,13 @@ export default function PartyPanel() {
                   <span className="text-genesis-text-dim flex items-center gap-1">
                     <Heart className="w-3 h-3" /> HP
                   </span>
-                  <span className="text-genesis-text font-mono">
+                  <span className={cn("font-mono", isDead ? "text-genesis-red" : "text-genesis-text")}>
                     {char.hp}/{char.max_hp}
                   </span>
                 </div>
                 <div className="h-2 bg-genesis-bg rounded-full overflow-hidden">
                   <div
-                    className={cn("h-full rounded-full transition-all duration-700", hpColor, hpPct < 25 && "animate-pulse")}
+                    className={cn("h-full rounded-full transition-all duration-700", hpColor, hpPct < 25 && !isDead && "animate-pulse")}
                     style={{ width: `${hpPct}%` }}
                   />
                 </div>
@@ -69,7 +93,7 @@ export default function PartyPanel() {
                 <span>{char.gold}g</span>
               </div>
 
-              {/* Ability Scores */}
+              {/* Ability Scores with Modifiers */}
               <div className="grid grid-cols-3 gap-1 pt-1">
                 {[
                   { key: "strength", label: "STR" },
@@ -78,18 +102,44 @@ export default function PartyPanel() {
                   { key: "intelligence", label: "INT" },
                   { key: "wisdom", label: "WIS" },
                   { key: "charisma", label: "CHA" },
-                ].map(({ key, label }) => (
-                  <div key={key} className="text-center bg-genesis-bg/50 rounded px-1 py-0.5">
-                    <div className="text-genesis-text-dim text-[9px] tracking-wider">{label}</div>
-                    <div className="text-genesis-text text-xs font-mono">
-                      {char.ability_scores[key as keyof typeof char.ability_scores]}
+                ].map(({ key, label }) => {
+                  const score = char.ability_scores[key as keyof typeof char.ability_scores];
+                  return (
+                    <div key={key} className="text-center bg-genesis-bg/50 rounded px-1 py-0.5">
+                      <div className="text-genesis-text-dim text-[9px] tracking-wider">{label}</div>
+                      <div className="text-genesis-text text-xs font-mono">
+                        {score}{" "}
+                        <span className="text-genesis-text-dim text-[9px]">
+                          ({modifier(score)})
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
+              {/* Spells */}
+              {char.spells && char.spells.length > 0 && (
+                <div className="pt-1">
+                  <div className="text-genesis-text-dim text-[9px] tracking-wider uppercase mb-1 flex items-center gap-1">
+                    <Wand2 className="w-3 h-3" /> Spells
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {char.spells.map((spell) => (
+                      <span
+                        key={spell.name}
+                        className="px-1.5 py-0.5 bg-genesis-purple/15 text-genesis-purple text-[10px] rounded"
+                        title={`${spell.description || spell.name}${spell.damage_dice ? ` (${spell.damage_dice})` : ""}`}
+                      >
+                        {spell.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Conditions */}
-              {char.conditions.length > 0 && (
+              {char.conditions && char.conditions.length > 0 && (
                 <div className="flex flex-wrap gap-1 pt-1">
                   {char.conditions.map((c) => (
                     <span key={c} className="px-1.5 py-0.5 bg-genesis-red/20 text-genesis-red text-[10px] rounded capitalize">
