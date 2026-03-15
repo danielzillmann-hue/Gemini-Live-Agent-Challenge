@@ -43,8 +43,12 @@ export default function GamePage() {
     isConnected, isThinking, players, combat, storyLog,
     musicMood, isMuted, toggleMute, worldMapUrl, npcs,
     world, narratorVoiceEnabled, toggleNarratorVoice,
-    playersOnline,
+    playersOnline, currentTurn,
   } = useGameStore();
+
+  const isMultiplayer = players.length > 1;
+  const isMyTurn = !isMultiplayer || !currentTurn || currentTurn.toLowerCase() === (myCharacterName || "").toLowerCase();
+  const inputDisabled = isThinking || (isMultiplayer && !isMyTurn);
 
   const { send } = useWebSocket(sessionId);
 
@@ -274,6 +278,20 @@ export default function GamePage() {
         )}
       </div>
 
+      {/* ── Turn Indicator (multiplayer) ─────────────────────── */}
+      {isMultiplayer && currentTurn && (
+        <div className={`px-4 py-1.5 text-center text-xs font-display tracking-wider border-t border-genesis-border shrink-0 ${
+          isMyTurn
+            ? "bg-genesis-accent/10 text-genesis-accent"
+            : "bg-genesis-bg text-genesis-text-dim"
+        }`}>
+          {isMyTurn
+            ? `Your turn, ${myCharacterName}!`
+            : `Waiting for ${currentTurn}...`
+          }
+        </div>
+      )}
+
       {/* ── Input Bar ────────────────────────────────────────── */}
       <footer className="h-16 flex items-center gap-3 px-4 border-t border-genesis-border bg-genesis-panel/80 backdrop-blur-sm shrink-0">
         {/* Voice */}
@@ -315,9 +333,13 @@ export default function GamePage() {
             placeholder={
               isThinking
                 ? "The Game Master is narrating..."
-                : "Describe your action... (press Enter to send)"
+                : isMultiplayer && !isMyTurn
+                  ? `Waiting for ${currentTurn}'s turn...`
+                  : isMultiplayer
+                    ? `Your turn, ${myCharacterName}! Describe your action...`
+                    : "Describe your action... (press Enter to send)"
             }
-            disabled={isThinking}
+            disabled={inputDisabled}
             className="genesis-input pr-12 disabled:opacity-50"
           />
           {isThinking && (
@@ -330,7 +352,7 @@ export default function GamePage() {
         {/* Send */}
         <button
           onClick={handleSendMessage}
-          disabled={!input.trim() || isThinking}
+          disabled={!input.trim() || inputDisabled}
           className="w-10 h-10 rounded-lg bg-genesis-accent text-genesis-bg flex items-center justify-center
                      disabled:opacity-30 disabled:cursor-not-allowed hover:bg-genesis-accent-dim transition-colors"
         >

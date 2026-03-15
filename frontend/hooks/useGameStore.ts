@@ -28,6 +28,7 @@ interface GameStore {
 
   // Multiplayer
   playersOnline: number;
+  currentTurn: string; // character name whose turn it is
 
   // Narrative
   storyLog: StoryEntry[];
@@ -78,6 +79,7 @@ const initialState = {
   combat: null,
   npcs: {},
   playersOnline: 1,
+  currentTurn: "",
   storyLog: [],
   currentSceneImage: null,
   currentSceneVideo: null,
@@ -324,6 +326,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       case "players_online":
         set({ playersOnline: (data.count as number) || 1 });
+        break;
+
+      case "turn_update":
+        set({ currentTurn: (data.current_turn as string) || "" });
         break;
 
       case "thinking":

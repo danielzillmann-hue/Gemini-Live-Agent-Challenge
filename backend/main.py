@@ -101,6 +101,69 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+class TurnManager:
+    """Manages turn order for multiplayer sessions.
+
+    Exploration: round-robin among players.
+    Combat: follows initiative order from CombatState.
+    """
+
+    def __init__(self) -> None:
+        self.current_turn: dict[str, str] = {}
+        self.is_processing: dict[str, bool] = {}
+
+    def get_current_turn(self, session: GameSession) -> str:
+        """Get the character name whose turn it is."""
+        sid = session.id
+        if session.combat.is_active:
+            current = session.combat.current_combatant
+            if current and current.is_player:
+                return current.name
+            return ""
+        else:
+            if sid not in self.current_turn and session.players:
+                self.current_turn[sid] = session.players[0].name
+            return self.current_turn.get(sid, "")
+
+    def advance_turn(self, session: GameSession) -> str:
+        """Move to the next player's turn. Returns the new active player name."""
+        sid = session.id
+        if session.combat.is_active:
+            current = session.combat.current_combatant
+            return current.name if current and current.is_player else ""
+
+        alive = [p for p in session.players if p.hp > 0]
+        if not alive:
+            return ""
+
+        current_name = self.current_turn.get(sid, "")
+        current_idx = next(
+            (i for i, p in enumerate(alive) if p.name == current_name), -1
+        )
+        next_idx = (current_idx + 1) % len(alive)
+        next_name = alive[next_idx].name
+        self.current_turn[sid] = next_name
+        return next_name
+
+    def is_players_turn(self, session: GameSession, character_name: str) -> bool:
+        """Check if it's this character's turn."""
+        if len(session.players) <= 1:
+            return True
+        current = self.get_current_turn(session)
+        if not current:
+            return False
+        return current.lower() == character_name.lower()
+
+    def set_processing(self, session_id: str, processing: bool) -> None:
+        self.is_processing[session_id] = processing
+
+    def is_busy(self, session_id: str) -> bool:
+        return self.is_processing.get(session_id, False)
+
+
+turn_manager = TurnManager()
+
+
 # ── REST API ───────────────────────────────────────────────────────────────
 
 class CreateSessionRequest(BaseModel):
@@ -357,11 +420,32 @@ async def _handle_player_action(
     if not player_input:
         return
 
+    character_name = data.get("character_name", "Player")
+
+    # Multiplayer turn enforcement
+    if len(session.players) > 1:
+        if turn_manager.is_busy(session_id):
+            await manager.broadcast(session_id, {
+                "type": "error",
+                "data": {"message": "The Game Master is still responding. Please wait."},
+            })
+            return
+
+        if not turn_manager.is_players_turn(session, character_name):
+            current = turn_manager.get_current_turn(session)
+            await manager.broadcast(session_id, {
+                "type": "error",
+                "data": {"message": f"It's {current}'s turn right now."},
+            })
+            return
+
+    turn_manager.set_processing(session_id, True)
+
     # Add player event to story
     session.add_event(StoryEvent(
         event_type="player_action",
         content=player_input,
-        speaker=data.get("character_name", "Player"),
+        speaker=character_name,
     ))
 
     # Build context for AI
@@ -411,6 +495,18 @@ async def _handle_player_action(
             "quests": [q.model_dump(mode="json") for q in session.world.quests],
         },
     })
+
+    # Advance turn and notify all clients
+    turn_manager.set_processing(session_id, False)
+    if len(session.players) > 1:
+        next_player = turn_manager.advance_turn(session)
+        await manager.broadcast(session_id, {
+            "type": "turn_update",
+            "data": {
+                "current_turn": next_player,
+                "is_combat": session.combat.is_active,
+            },
+        })
 
     # Auto-save to Firestore periodically (every 5 events)
     if len(session.story_events) % 5 == 0:
