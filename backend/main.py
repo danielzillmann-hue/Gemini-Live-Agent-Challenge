@@ -163,18 +163,21 @@ async def add_character(session_id: str, req: CreateCharacterRequest):
         appearance=req.appearance,
     )
 
-    # Generate portrait
-    portrait_bytes = await media_service.generate_character_portrait(
-        name=req.name,
-        race=req.race.value,
-        character_class=req.character_class.value,
-        appearance=req.appearance or f"A {req.race.value} {req.character_class.value}",
-    )
-    if portrait_bytes:
-        url = await storage_service.upload_media(
-            portrait_bytes, "image", "image/png", session_id
+    # Generate portrait (non-blocking — don't fail character creation if this fails)
+    try:
+        portrait_bytes = await media_service.generate_character_portrait(
+            name=req.name,
+            race=req.race.value,
+            character_class=req.character_class.value,
+            appearance=req.appearance or f"A {req.race.value} {req.character_class.value}",
         )
-        character.portrait_url = url
+        if portrait_bytes:
+            url = await storage_service.upload_media(
+                portrait_bytes, "image", "image/png", session_id
+            )
+            character.portrait_url = url
+    except Exception:
+        logger.warning("Portrait generation/upload failed for %s, continuing without", req.name)
 
     game_engine.add_player(session_id, character)
 
