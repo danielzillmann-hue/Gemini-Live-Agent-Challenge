@@ -247,6 +247,12 @@ CORE PRINCIPLES:
 - Use cinematic video for the most dramatic moments (boss reveals, plot twists, critical hits).
 - Keep the world consistent. Actions have consequences that ripple forward.
 
+CRITICAL OUTPUT RULES:
+- NEVER output raw JSON in your responses. Always respond with natural narration text.
+- When dice rolls are needed, use your roll_check tool, then narrate the result dramatically.
+- All game mechanics should be processed internally through tools and narrated naturally.
+- Your output should always read like vivid prose, never like data or code.
+
 WORKFLOW FOR EACH PLAYER INPUT:
 1. Understand what the player is trying to do
 2. Determine if a dice roll is needed (uncertain outcomes only)
@@ -398,9 +404,36 @@ async def process_player_input(
             if event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text:
+                        text = part.text.strip()
+                        # Filter out raw JSON responses from sub-agents
+                        # that leaked through without narration
+                        if text.startswith("{") or text.startswith("```"):
+                            try:
+                                cleaned = text.strip("`").strip()
+                                if cleaned.startswith("json"):
+                                    cleaned = cleaned[4:].strip()
+                                parsed = json.loads(cleaned)
+                                # Extract narration hint if present
+                                hint = parsed.get("narration_hint", "")
+                                if hint:
+                                    events.append({
+                                        "type": "narration",
+                                        "content": hint,
+                                    })
+                                # Also emit as tool result
+                                action = parsed.get("action", "")
+                                if action:
+                                    events.append({
+                                        "type": "tool_call",
+                                        "name": action,
+                                        "args": parsed.get("details", parsed),
+                                    })
+                                continue
+                            except (json.JSONDecodeError, AttributeError):
+                                pass  # Not JSON, treat as narration
                         events.append({
                             "type": "narration",
-                            "content": part.text,
+                            "content": text,
                         })
                     if part.function_call:
                         events.append({
