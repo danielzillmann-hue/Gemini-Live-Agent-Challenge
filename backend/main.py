@@ -417,8 +417,9 @@ async def _handle_player_action(session_id: str, session, data: dict[str, Any]) 
 
     character_name = data.get("character_name", "Player")
 
-    # Single player: immediate
-    if len(session.players) <= 1:
+    # Single player: immediate (check connected clients, not character count)
+    connected_count = len(manager.active.get(session_id, []))
+    if connected_count <= 1:
         session.add_event(StoryEvent(event_type="player_action", content=player_input, speaker=character_name))
         await process_single_action(session_id, session, character_name, player_input)
         return
