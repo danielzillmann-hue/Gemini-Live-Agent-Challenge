@@ -29,10 +29,14 @@ class TestActionWindowExploration:
     async def test_submit_action_accepted(self):
         window = ActionWindow()
         broadcasts = []
-        window.set_callbacks(
-            lambda sid, msg: broadcasts.append(msg),
-            lambda sid, s, text, speaker: None,
-        )
+
+        async def mock_broadcast(sid, msg):
+            broadcasts.append(msg)
+
+        async def mock_process(sid, s, text, speaker):
+            pass
+
+        window.set_callbacks(mock_broadcast, mock_process)
         session = _make_session(2)
         error = await window.submit_action(session.id, session, "Player0", "I search the room")
         assert error is None
@@ -45,7 +49,10 @@ class TestActionWindowExploration:
         async def mock_broadcast(sid, msg):
             broadcasts.append(msg)
 
-        window.set_callbacks(mock_broadcast, lambda sid, s, t, sp: None)
+        async def mock_process(sid, s, t, sp):
+            pass
+
+        window.set_callbacks(mock_broadcast, mock_process)
         session = _make_session(2)
 
         await window.submit_action(session.id, session, "Player0", "I search")
@@ -56,6 +63,14 @@ class TestActionWindowExploration:
     @pytest.mark.asyncio
     async def test_busy_during_processing(self):
         window = ActionWindow()
+
+        async def mock_broadcast(sid, msg):
+            pass
+
+        async def mock_process(sid, s, t, sp):
+            pass
+
+        window.set_callbacks(mock_broadcast, mock_process)
         window.is_processing["test"] = True
         session = _make_session(2)
         session.id = "test"
@@ -68,7 +83,11 @@ class TestActionWindowCombat:
     @pytest.mark.asyncio
     async def test_combat_wrong_turn_rejected(self):
         window = ActionWindow()
-        window.set_callbacks(lambda s, m: None, lambda s, se, t, sp: None)
+
+        async def noop(*a):
+            pass
+
+        window.set_callbacks(noop, noop)
         session = _make_session(2)
         # Simulate active combat with Player1's turn
         from game.models import Combatant, CombatPhase
@@ -87,7 +106,11 @@ class TestActionWindowCombat:
     @pytest.mark.asyncio
     async def test_combat_correct_turn_accepted(self):
         window = ActionWindow()
-        window.set_callbacks(lambda s, m: None, lambda s, se, t, sp: None)
+
+        async def noop(*a):
+            pass
+
+        window.set_callbacks(noop, noop)
         session = _make_session(2)
         from game.models import Combatant, CombatPhase
         session.combat = CombatState(

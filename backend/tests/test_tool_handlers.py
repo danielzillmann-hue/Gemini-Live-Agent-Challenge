@@ -16,7 +16,11 @@ from agents.tool_handlers import (
 
 @pytest.fixture
 def engine():
-    return GameEngine()
+    """Use the global game_engine singleton so tool handlers can see sessions."""
+    from game.engine import game_engine
+    # Clear any existing sessions
+    game_engine.sessions.clear()
+    return game_engine
 
 
 @pytest.fixture
