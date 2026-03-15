@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sword, Wand2, Shield, Skull, Crown, Scroll, Sparkles } from "lucide-react";
+import { Sword, Wand2, Shield, Skull, Crown, Scroll, Sparkles, Users, Copy, Check } from "lucide-react";
 import { api } from "@/lib/api";
 import { useGameStore } from "@/hooks/useGameStore";
 import CharacterCreation from "@/components/CharacterCreation";
 
-type Phase = "title" | "setup" | "characters" | "launching";
+type Phase = "title" | "setup" | "join" | "characters" | "launching";
 
 const PRESETS = [
   {
@@ -39,6 +39,32 @@ export default function HomePage() {
   const [setting, setSetting] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  async function handleJoinSession() {
+    const code = joinCode.trim();
+    if (!code) return;
+    setJoinError("");
+    try {
+      const session = await api.getSession(code);
+      const world = session.world as Record<string, string>;
+      setSessionId(code);
+      setSession(code, world?.campaign_name || "Campaign", world?.setting_description || "");
+      setPhase("characters");
+    } catch {
+      setJoinError("Session not found. Check the code and try again.");
+    }
+  }
+
+  function copyInviteLink() {
+    if (!sessionId) return;
+    const url = `${window.location.origin}/game/${sessionId}`;
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   async function handleCreateSession() {
     if (!campaignName || !setting) return;
@@ -119,6 +145,13 @@ export default function HomePage() {
               >
                 <Sparkles className="inline-block w-5 h-5 mr-2 -mt-0.5" />
                 New Campaign
+              </button>
+              <button
+                onClick={() => setPhase("join")}
+                className="genesis-button-secondary text-lg px-8 py-3"
+              >
+                <Users className="inline-block w-5 h-5 mr-2 -mt-0.5" />
+                Join Game
               </button>
             </motion.div>
 
@@ -237,6 +270,61 @@ export default function HomePage() {
           </motion.div>
         )}
 
+        {/* ── Join Game ─────────────────────────────────────────── */}
+        {phase === "join" && (
+          <motion.div
+            key="join"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -30 }}
+            transition={{ duration: 0.6 }}
+            className="relative z-10 w-full max-w-md px-6"
+          >
+            <h2 className="font-display text-4xl text-genesis-accent text-center mb-2 tracking-wider">
+              Join Adventure
+            </h2>
+            <p className="text-genesis-text-dim text-center mb-8">
+              Enter the session code shared by the Game Master
+            </p>
+
+            <div className="genesis-panel p-6 space-y-4">
+              <div>
+                <label className="block text-genesis-text-dim text-xs tracking-wider uppercase mb-2">
+                  Session Code
+                </label>
+                <input
+                  value={joinCode}
+                  onChange={(e) => { setJoinCode(e.target.value); setJoinError(""); }}
+                  onKeyDown={(e) => e.key === "Enter" && handleJoinSession()}
+                  placeholder="Paste session code here..."
+                  className="genesis-input font-mono text-center text-lg tracking-widest"
+                  autoFocus
+                />
+              </div>
+              {joinError && (
+                <p className="text-genesis-red text-sm text-center">{joinError}</p>
+              )}
+            </div>
+
+            <div className="flex justify-between mt-8">
+              <button
+                onClick={() => setPhase("title")}
+                className="genesis-button-secondary"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleJoinSession}
+                disabled={!joinCode.trim()}
+                className="genesis-button disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Users className="inline w-4 h-4 mr-1 -mt-0.5" />
+                Join Session
+              </button>
+            </div>
+          </motion.div>
+        )}
+
         {/* ── Character Creation ───────────────────────────────── */}
         {phase === "characters" && sessionId && (
           <motion.div
@@ -247,6 +335,24 @@ export default function HomePage() {
             transition={{ duration: 0.6 }}
             className="relative z-10 w-full max-w-4xl px-6"
           >
+            {/* Invite Link */}
+            <div className="genesis-panel p-3 mb-6 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-genesis-text-dim text-xs">
+                <Users className="w-4 h-4 text-genesis-accent" />
+                <span className="tracking-wider uppercase">Invite others — share this code:</span>
+                <code className="bg-genesis-bg px-3 py-1 rounded font-mono text-genesis-accent text-sm tracking-widest">
+                  {sessionId}
+                </code>
+              </div>
+              <button
+                onClick={copyInviteLink}
+                className="genesis-button-secondary text-xs px-3 py-1.5 flex items-center gap-1"
+              >
+                {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                {copied ? "Copied!" : "Copy Link"}
+              </button>
+            </div>
+
             <CharacterCreation
               sessionId={sessionId}
               onComplete={handleStartGame}

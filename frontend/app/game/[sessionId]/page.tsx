@@ -38,6 +38,7 @@ export default function GamePage() {
     isConnected, isThinking, players, combat, storyLog,
     musicMood, isMuted, toggleMute, worldMapUrl, npcs,
     world, narratorVoiceEnabled, toggleNarratorVoice,
+    playersOnline,
   } = useGameStore();
 
   const { send } = useWebSocket(sessionId);
@@ -147,6 +148,13 @@ export default function GamePage() {
               <span className="capitalize">{world.time_of_day}</span>
               <span className="opacity-40">|</span>
               <span className="capitalize">{world.weather}</span>
+              <span className="opacity-40">|</span>
+            </>
+          )}
+          {playersOnline > 1 && (
+            <>
+              <Users className="w-3 h-3" />
+              <span>{playersOnline} players</span>
               <span className="opacity-40">|</span>
             </>
           )}

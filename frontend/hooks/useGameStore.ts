@@ -26,6 +26,9 @@ interface GameStore {
   combat: CombatState | null;
   npcs: Record<string, NPC>;
 
+  // Multiplayer
+  playersOnline: number;
+
   // Narrative
   storyLog: StoryEntry[];
   currentSceneImage: string | null;
@@ -74,6 +77,7 @@ const initialState = {
   world: null,
   combat: null,
   npcs: {},
+  playersOnline: 1,
   storyLog: [],
   currentSceneImage: null,
   currentSceneVideo: null,
@@ -290,6 +294,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         if (data.players) store.setPlayers(data.players as Character[]);
         if (data.world) store.setWorld(data.world as unknown as WorldState);
         if (data.combat) store.setCombat(data.combat as unknown as CombatState);
+        break;
+
+      case "players_online":
+        set({ playersOnline: (data.count as number) || 1 });
         break;
 
       case "thinking":

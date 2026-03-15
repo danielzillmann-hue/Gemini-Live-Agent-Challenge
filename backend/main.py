@@ -65,13 +65,27 @@ class ConnectionManager:
     async def connect(self, session_id: str, ws: WebSocket) -> None:
         await ws.accept()
         self.active.setdefault(session_id, []).append(ws)
-        logger.info("Player connected to session %s (%d total)", session_id, len(self.active[session_id]))
+        count = len(self.active[session_id])
+        logger.info("Player connected to session %s (%d total)", session_id, count)
+        # Notify all clients of player count change
+        await self.broadcast(session_id, {
+            "type": "players_online",
+            "data": {"count": count},
+        })
 
-    def disconnect(self, session_id: str, ws: WebSocket) -> None:
+    async def disconnect(self, session_id: str, ws: WebSocket) -> None:
         if session_id in self.active:
             self.active[session_id] = [w for w in self.active[session_id] if w is not ws]
             if not self.active[session_id]:
                 del self.active[session_id]
+            else:
+                await self.broadcast(session_id, {
+                    "type": "players_online",
+                    "data": {"count": len(self.active[session_id])},
+                })
+
+    def get_player_count(self, session_id: str) -> int:
+        return len(self.active.get(session_id, []))
 
     async def broadcast(self, session_id: str, message: dict[str, Any]) -> None:
         for ws in self.active.get(session_id, []):
@@ -271,7 +285,7 @@ async def websocket_game(ws: WebSocket, session_id: str):
                 })
 
     except WebSocketDisconnect:
-        manager.disconnect(session_id, ws)
+        await manager.disconnect(session_id, ws)
         logger.info("Player disconnected from session %s", session_id)
 
 
