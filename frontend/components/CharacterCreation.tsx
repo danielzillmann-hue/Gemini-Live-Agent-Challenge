@@ -6,6 +6,7 @@ import { User, Plus, Play } from "lucide-react";
 import { api } from "@/lib/api";
 import { useGameStore } from "@/hooks/useGameStore";
 import type { Character } from "@/lib/types";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const RACES = ["human", "elf", "dwarf", "halfling", "orc", "tiefling", "dragonborn", "gnome"];
 const CLASSES = ["warrior", "mage", "ranger", "rogue", "paladin", "cleric", "bard", "warlock", "druid", "monk"];
@@ -31,7 +32,8 @@ export default function CharacterCreation({ sessionId, onComplete }: Props) {
     if (!form.name) return;
     setIsCreating(true);
     try {
-      await api.createCharacter({ session_id: sessionId, ...form });
+      const character = await api.createCharacter({ session_id: sessionId, ...form });
+      useGameStore.getState().addPlayer(character as unknown as Character);
       setForm({ name: "", race: "human", character_class: "warrior", backstory: "", personality: "", appearance: "" });
     } catch (err) {
       console.error("Failed to create character:", err);
