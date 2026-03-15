@@ -603,10 +603,32 @@ async def _handle_camera_frame(session_id: str, session, data: dict[str, Any]) -
         pass
 
 
+# Track which sessions have already started (prevents duplicate openings)
+_started_sessions: set[str] = set()
+
+
 async def _handle_start_game(session_id: str, session) -> None:
     if not session.players:
         await manager.broadcast(session_id, {"type": "error", "data": {"message": "No players. Create characters first."}})
         return
+
+    # Prevent duplicate openings — only run once per session
+    if session_id in _started_sessions:
+        # Late joiner — send them a recap instead of replaying the opening
+        if session.story_events:
+            # Send existing story events so they can catch up
+            await manager.broadcast(session_id, {
+                "type": "narration",
+                "data": {"content": f"A new adventurer joins the party! Welcome to {session.world.campaign_name}."},
+            })
+            # Re-sync full game state so the late joiner sees everything
+            await manager.broadcast(session_id, {
+                "type": "game_state_sync",
+                "data": session.model_dump(mode="json"),
+            })
+        return
+
+    _started_sessions.add(session_id)
 
     await manager.broadcast(session_id, {"type": "thinking", "data": {}})
 
