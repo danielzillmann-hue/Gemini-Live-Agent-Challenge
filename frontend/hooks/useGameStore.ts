@@ -28,7 +28,13 @@ interface GameStore {
 
   // Multiplayer
   playersOnline: number;
-  currentTurn: string; // character name whose turn it is
+  currentTurn: string;
+  // Action window
+  actionWindowStatus: "none" | "open" | "collecting" | "countdown" | "closed";
+  actionWindowSeconds: number;
+  actionWindowSubmitted: number;
+  actionWindowTotal: number;
+  hasSubmittedAction: boolean;
 
   // Narrative
   storyLog: StoryEntry[];
@@ -80,6 +86,11 @@ const initialState = {
   npcs: {},
   playersOnline: 1,
   currentTurn: "",
+  actionWindowStatus: "none" as const,
+  actionWindowSeconds: 0,
+  actionWindowSubmitted: 0,
+  actionWindowTotal: 0,
+  hasSubmittedAction: false,
   storyLog: [],
   currentSceneImage: null,
   currentSceneVideo: null,
@@ -331,6 +342,42 @@ export const useGameStore = create<GameStore>((set, get) => ({
       case "turn_update":
         set({ currentTurn: (data.current_turn as string) || "" });
         break;
+
+      case "action_window": {
+        const status = data.status as string;
+        if (status === "open") {
+          set({
+            actionWindowStatus: "open",
+            actionWindowSeconds: (data.seconds_remaining as number) || 12,
+            actionWindowSubmitted: 0,
+            actionWindowTotal: (data.total_players as number) || 1,
+            hasSubmittedAction: false,
+            isThinking: false,
+          });
+        } else if (status === "collecting") {
+          set({
+            actionWindowStatus: "collecting",
+            actionWindowSubmitted: (data.submitted_count as number) || 0,
+            actionWindowTotal: (data.total_players as number) || 1,
+          });
+          store.addStoryEntry({
+            type: "system",
+            content: `${data.submitted_by as string} declares their action.`,
+          });
+        } else if (status === "countdown") {
+          set({
+            actionWindowStatus: "countdown",
+            actionWindowSeconds: (data.seconds_remaining as number) || 0,
+            actionWindowSubmitted: (data.submitted_count as number) || 0,
+          });
+        } else if (status === "closed") {
+          set({
+            actionWindowStatus: "closed",
+            hasSubmittedAction: false,
+          });
+        }
+        break;
+      }
 
       case "thinking":
         set({ isThinking: true });

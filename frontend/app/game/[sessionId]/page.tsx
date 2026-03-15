@@ -44,11 +44,17 @@ export default function GamePage() {
     musicMood, isMuted, toggleMute, worldMapUrl, npcs,
     world, narratorVoiceEnabled, toggleNarratorVoice,
     playersOnline, currentTurn,
+    actionWindowStatus, actionWindowSeconds, actionWindowSubmitted,
+    actionWindowTotal, hasSubmittedAction,
   } = useGameStore();
 
   const isMultiplayer = players.length > 1;
-  const isMyTurn = !isMultiplayer || !currentTurn || currentTurn.toLowerCase() === (myCharacterName || "").toLowerCase();
-  const inputDisabled = isThinking || (isMultiplayer && !isMyTurn);
+  const isCombat = combat?.is_active || false;
+  const combatTurn = isCombat ? currentTurn : "";
+  const isMyTurnCombat = !isCombat || !combatTurn || combatTurn.toLowerCase() === (myCharacterName || "").toLowerCase();
+  const inputDisabled = isThinking
+    || (isMultiplayer && isCombat && !isMyTurnCombat)
+    || (isMultiplayer && !isCombat && hasSubmittedAction);
 
   const { send } = useWebSocket(sessionId);
 
@@ -91,12 +97,17 @@ export default function GamePage() {
   function handleSendMessage() {
     const text = input.trim();
     if (!text) return;
-    send("player_action", { text, character_name: myCharacterName || players[0]?.name || "Player" });
+    const charName = myCharacterName || players[0]?.name || "Player";
+    send("player_action", { text, character_name: charName });
     useGameStore.getState().addStoryEntry({
       type: "action",
       content: text,
-      speaker: myCharacterName || players[0]?.name || "Player",
+      speaker: charName,
     });
+    // Mark action as submitted for this window
+    if (isMultiplayer && !isCombat) {
+      useGameStore.setState({ hasSubmittedAction: true });
+    }
     setInput("");
     inputRef.current?.focus();
   }
@@ -278,16 +289,30 @@ export default function GamePage() {
         )}
       </div>
 
-      {/* ── Turn Indicator (multiplayer) ─────────────────────── */}
-      {isMultiplayer && currentTurn && (
+      {/* ── Action Window / Turn Indicator (multiplayer) ────── */}
+      {isMultiplayer && !isCombat && actionWindowStatus !== "none" && actionWindowStatus !== "closed" && (
+        <div className="px-4 py-1.5 text-center text-xs font-display tracking-wider border-t border-genesis-border shrink-0 bg-genesis-accent/10 text-genesis-accent flex items-center justify-center gap-3">
+          {hasSubmittedAction ? (
+            <span>Action submitted! Waiting for others... ({actionWindowSubmitted}/{actionWindowTotal})</span>
+          ) : (
+            <span>Declare your action! ({actionWindowSubmitted}/{actionWindowTotal} ready)</span>
+          )}
+          {actionWindowSeconds > 0 && (
+            <span className="bg-genesis-accent/20 px-2 py-0.5 rounded font-mono">
+              {actionWindowSeconds}s
+            </span>
+          )}
+        </div>
+      )}
+      {isMultiplayer && isCombat && combatTurn && (
         <div className={`px-4 py-1.5 text-center text-xs font-display tracking-wider border-t border-genesis-border shrink-0 ${
-          isMyTurn
+          isMyTurnCombat
             ? "bg-genesis-accent/10 text-genesis-accent"
             : "bg-genesis-bg text-genesis-text-dim"
         }`}>
-          {isMyTurn
-            ? `Your turn, ${myCharacterName}!`
-            : `Waiting for ${currentTurn}...`
+          {isMyTurnCombat
+            ? `Your turn in combat, ${myCharacterName}!`
+            : `Waiting for ${combatTurn}'s combat turn...`
           }
         </div>
       )}
@@ -333,11 +358,13 @@ export default function GamePage() {
             placeholder={
               isThinking
                 ? "The Game Master is narrating..."
-                : isMultiplayer && !isMyTurn
-                  ? `Waiting for ${currentTurn}'s turn...`
-                  : isMultiplayer
-                    ? `Your turn, ${myCharacterName}! Describe your action...`
-                    : "Describe your action... (press Enter to send)"
+                : isMultiplayer && !isCombat && hasSubmittedAction
+                  ? "Action submitted. Waiting for other players..."
+                  : isMultiplayer && isCombat && !isMyTurnCombat
+                    ? `Waiting for ${combatTurn}'s combat turn...`
+                    : isMultiplayer
+                      ? `${myCharacterName}, what do you do?`
+                      : "Describe your action... (press Enter to send)"
             }
             disabled={inputDisabled}
             className="genesis-input pr-12 disabled:opacity-50"

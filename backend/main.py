@@ -101,67 +101,169 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-class TurnManager:
-    """Manages turn order for multiplayer sessions.
+ACTION_WINDOW_SECONDS = 12  # How long players have to submit actions
 
-    Exploration: round-robin among players.
-    Combat: follows initiative order from CombatState.
+
+class ActionWindow:
+    """Collects player actions during a time window, then batches them to the AI.
+
+    Exploration: All players submit actions during the window. When it closes,
+    all actions are sent as one prompt and the AI narrates the combined result.
+
+    Combat: Strict initiative order. Only the active combatant can act.
+    No window needed — their action processes immediately.
     """
 
     def __init__(self) -> None:
-        self.current_turn: dict[str, str] = {}
+        # session_id -> list of (character_name, action_text)
+        self.pending_actions: dict[str, list[tuple[str, str]]] = {}
+        # session_id -> asyncio.Task for the window timer
+        self.window_timers: dict[str, asyncio.Task] = {}
+        # session_id -> whether AI is currently processing
         self.is_processing: dict[str, bool] = {}
+        # session_id -> which players have submitted this window
+        self.submitted: dict[str, set[str]] = {}
 
-    def get_current_turn(self, session: GameSession) -> str:
-        """Get the character name whose turn it is."""
-        sid = session.id
-        if session.combat.is_active:
-            current = session.combat.current_combatant
-            if current and current.is_player:
-                return current.name
-            return ""
-        else:
-            if sid not in self.current_turn and session.players:
-                self.current_turn[sid] = session.players[0].name
-            return self.current_turn.get(sid, "")
+    def is_combat(self, session: GameSession) -> bool:
+        return session.combat.is_active
 
-    def advance_turn(self, session: GameSession) -> str:
-        """Move to the next player's turn. Returns the new active player name."""
-        sid = session.id
-        if session.combat.is_active:
-            current = session.combat.current_combatant
-            return current.name if current and current.is_player else ""
-
-        alive = [p for p in session.players if p.hp > 0]
-        if not alive:
-            return ""
-
-        current_name = self.current_turn.get(sid, "")
-        current_idx = next(
-            (i for i, p in enumerate(alive) if p.name == current_name), -1
-        )
-        next_idx = (current_idx + 1) % len(alive)
-        next_name = alive[next_idx].name
-        self.current_turn[sid] = next_name
-        return next_name
-
-    def is_players_turn(self, session: GameSession, character_name: str) -> bool:
-        """Check if it's this character's turn."""
-        if len(session.players) <= 1:
-            return True
-        current = self.get_current_turn(session)
-        if not current:
-            return False
-        return current.lower() == character_name.lower()
-
-    def set_processing(self, session_id: str, processing: bool) -> None:
-        self.is_processing[session_id] = processing
+    def get_combat_turn(self, session: GameSession) -> str:
+        """Get current combatant name in combat."""
+        current = session.combat.current_combatant
+        if current and current.is_player:
+            return current.name
+        return ""
 
     def is_busy(self, session_id: str) -> bool:
         return self.is_processing.get(session_id, False)
 
+    async def submit_action(
+        self, session_id: str, session: GameSession,
+        character_name: str, action_text: str,
+    ) -> str | None:
+        """Submit a player action. Returns error message or None on success."""
+        if self.is_busy(session_id):
+            return "The Game Master is still narrating. Please wait."
 
-turn_manager = TurnManager()
+        # ── Combat: immediate, strict initiative ──
+        if self.is_combat(session):
+            current = self.get_combat_turn(session)
+            if not current:
+                return "It's the enemy's turn. Please wait."
+            if current.lower() != character_name.lower():
+                return f"It's {current}'s turn in combat."
+            # Process immediately
+            self.is_processing[session_id] = True
+            return None
+
+        # ── Exploration: action window ──
+        # Check if player already submitted this window
+        if session_id in self.submitted and character_name.lower() in self.submitted[session_id]:
+            return "You've already submitted your action. Waiting for other players..."
+
+        # Add to pending
+        self.pending_actions.setdefault(session_id, []).append(
+            (character_name, action_text)
+        )
+        self.submitted.setdefault(session_id, set()).add(character_name.lower())
+
+        # Broadcast that this player has declared
+        alive_players = [p for p in session.players if p.hp > 0]
+        submitted_count = len(self.submitted.get(session_id, set()))
+        total_players = len(alive_players)
+
+        await manager.broadcast(session_id, {
+            "type": "action_window",
+            "data": {
+                "status": "collecting",
+                "submitted_by": character_name,
+                "submitted_count": submitted_count,
+                "total_players": total_players,
+                "seconds_remaining": ACTION_WINDOW_SECONDS,
+            },
+        })
+
+        # Start window timer on first action (if not already running)
+        if session_id not in self.window_timers or self.window_timers[session_id].done():
+            self.window_timers[session_id] = asyncio.create_task(
+                self._window_countdown(session_id, session)
+            )
+
+        # If all alive players have submitted, close window early
+        if submitted_count >= total_players:
+            if session_id in self.window_timers and not self.window_timers[session_id].done():
+                self.window_timers[session_id].cancel()
+            asyncio.create_task(self._close_window(session_id, session))
+
+        return None  # Accepted
+
+    async def _window_countdown(self, session_id: str, session: GameSession) -> None:
+        """Count down the action window and broadcast remaining time."""
+        for remaining in range(ACTION_WINDOW_SECONDS, 0, -1):
+            await asyncio.sleep(1)
+            # Broadcast countdown every 3 seconds
+            if remaining % 3 == 0 or remaining <= 3:
+                await manager.broadcast(session_id, {
+                    "type": "action_window",
+                    "data": {
+                        "status": "countdown",
+                        "seconds_remaining": remaining,
+                        "submitted_count": len(self.submitted.get(session_id, set())),
+                        "total_players": len([p for p in session.players if p.hp > 0]),
+                    },
+                })
+        # Window closed — process all actions
+        await self._close_window(session_id, session)
+
+    async def _close_window(self, session_id: str, session: GameSession) -> None:
+        """Close the action window and process all collected actions."""
+        actions = self.pending_actions.pop(session_id, [])
+        self.submitted.pop(session_id, None)
+        if session_id in self.window_timers:
+            del self.window_timers[session_id]
+
+        if not actions:
+            return
+
+        self.is_processing[session_id] = True
+
+        await manager.broadcast(session_id, {
+            "type": "action_window",
+            "data": {"status": "closed"},
+        })
+
+        # Build combined prompt
+        if len(actions) == 1:
+            char_name, text = actions[0]
+            combined = text
+            speaker = char_name
+        else:
+            parts = [f"{name}: {text}" for name, text in actions]
+            combined = "Multiple players act simultaneously:\n" + "\n".join(parts)
+            speaker = "Party"
+
+        # Process through the AI pipeline
+        await _handle_batched_actions(session_id, session, combined, speaker)
+
+        self.is_processing[session_id] = False
+
+        # Broadcast that a new action window is open
+        await manager.broadcast(session_id, {
+            "type": "action_window",
+            "data": {
+                "status": "open",
+                "seconds_remaining": ACTION_WINDOW_SECONDS,
+                "submitted_count": 0,
+                "total_players": len([p for p in session.players if p.hp > 0]),
+            },
+        })
+
+    def finish_combat_action(self, session_id: str) -> None:
+        """Mark combat action processing as done."""
+        self.is_processing[session_id] = False
+
+
+action_window = ActionWindow()
 
 
 # ── REST API ───────────────────────────────────────────────────────────────
@@ -415,57 +517,70 @@ async def websocket_game(ws: WebSocket, session_id: str):
 async def _handle_player_action(
     session_id: str, session: GameSession, data: dict[str, Any]
 ) -> None:
-    """Process a text-based player action through the AI pipeline."""
+    """Route player action through the appropriate system."""
     player_input = data.get("text", "")
     if not player_input:
         return
 
     character_name = data.get("character_name", "Player")
 
-    # Multiplayer turn enforcement
-    if len(session.players) > 1:
-        if turn_manager.is_busy(session_id):
-            await manager.broadcast(session_id, {
-                "type": "error",
-                "data": {"message": "The Game Master is still responding. Please wait."},
-            })
-            return
+    # Single player: process immediately, no window needed
+    if len(session.players) <= 1:
+        await _process_single_action(session_id, session, character_name, player_input)
+        return
 
-        if not turn_manager.is_players_turn(session, character_name):
-            current = turn_manager.get_current_turn(session)
-            await manager.broadcast(session_id, {
-                "type": "error",
-                "data": {"message": f"It's {current}'s turn right now."},
-            })
-            return
+    # Multiplayer: route through ActionWindow
+    error = await action_window.submit_action(
+        session_id, session, character_name, player_input,
+    )
+    if error:
+        await manager.broadcast(session_id, {
+            "type": "error",
+            "data": {"message": error},
+        })
+        return
 
-    turn_manager.set_processing(session_id, True)
+    # Combat actions process immediately (ActionWindow validates turn order)
+    if action_window.is_combat(session):
+        session.add_event(StoryEvent(
+            event_type="player_action",
+            content=player_input,
+            speaker=character_name,
+        ))
+        await _process_single_action(session_id, session, character_name, player_input)
+        action_window.finish_combat_action(session_id)
 
-    # Add player event to story
+
+async def _handle_batched_actions(
+    session_id: str, session: GameSession,
+    combined_input: str, speaker: str,
+) -> None:
+    """Process batched exploration actions from multiple players."""
     session.add_event(StoryEvent(
         event_type="player_action",
-        content=player_input,
-        speaker=character_name,
+        content=combined_input,
+        speaker=speaker,
     ))
 
-    # Build context for AI
+    await _process_single_action(session_id, session, speaker, combined_input)
+
+
+async def _process_single_action(
+    session_id: str, session: GameSession,
+    character_name: str, player_input: str,
+) -> None:
+    """Core action processing — AI pipeline, media gen, state sync."""
     context = game_engine.get_context_summary(session)
 
-    # Send "thinking" indicator
     await manager.broadcast(session_id, {"type": "thinking", "data": {}})
 
-    # Process through ADK agent pipeline
     tool_events = await process_player_input(session_id, player_input, context)
-
-    # Execute tool results (media generation, state updates)
     ws_messages = await process_tool_results(session_id, tool_events, session)
 
-    # Broadcast all results to connected clients
     for msg in ws_messages:
         msg["session_id"] = session_id
         await manager.broadcast(session_id, msg)
 
-        # Record narration events and detect scene tags
         if msg["type"] == "narration":
             content = msg["data"].get("content", "")
             session.add_event(StoryEvent(
@@ -475,16 +590,13 @@ async def _handle_player_action(
                 drama_level=game_engine.calculate_drama_level(session),
             ))
 
-            # Detect [NEW_SCENE] or [CINEMATIC] tags and generate images
             if "[NEW_SCENE]" in content or "[CINEMATIC]" in content:
-                # Strip tags from narration for clean display
                 clean_content = content.replace("[NEW_SCENE]", "").replace("[CINEMATIC]", "").strip()
-                # Generate scene image in background
                 asyncio.create_task(
                     _generate_scene_from_narration(session_id, session, clean_content)
                 )
 
-    # Send full updated game state (players, world, combat, NPCs, quests)
+    # Sync full game state
     await manager.broadcast(session_id, {
         "type": "game_state_sync",
         "data": {
@@ -496,19 +608,7 @@ async def _handle_player_action(
         },
     })
 
-    # Advance turn and notify all clients
-    turn_manager.set_processing(session_id, False)
-    if len(session.players) > 1:
-        next_player = turn_manager.advance_turn(session)
-        await manager.broadcast(session_id, {
-            "type": "turn_update",
-            "data": {
-                "current_turn": next_player,
-                "is_combat": session.combat.is_active,
-            },
-        })
-
-    # Auto-save to Firestore periodically (every 5 events)
+    # Auto-save periodically
     if len(session.story_events) % 5 == 0:
         try:
             await firestore_service.save_session(session)
