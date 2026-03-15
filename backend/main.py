@@ -433,18 +433,21 @@ async def _handle_start_game(session_id: str, session: GameSession) -> None:
     tool_events = await process_player_input(session_id, opening_prompt, context)
     ws_messages = await process_tool_results(session_id, tool_events, session)
 
-    # Generate opening scene image
-    scene_bytes = await media_service.generate_scene_image(
-        scene_description=f"Opening scene of {session.world.campaign_name}: {session.world.setting_description}",
-        time_of_day=session.world.time_of_day,
-        weather=session.world.weather,
-    )
-    if scene_bytes:
-        url = await storage_service.upload_media(scene_bytes, "image", "image/png", session_id)
-        ws_messages.insert(0, {
-            "type": "scene_image",
-            "data": {"url": url, "description": "Opening scene"},
-        })
+    # Generate opening scene image (non-blocking)
+    try:
+        scene_bytes = await media_service.generate_scene_image(
+            scene_description=f"Opening scene of {session.world.campaign_name}: {session.world.setting_description}",
+            time_of_day=session.world.time_of_day,
+            weather=session.world.weather,
+        )
+        if scene_bytes:
+            url = await storage_service.upload_media(scene_bytes, "image", "image/png", session_id)
+            ws_messages.insert(0, {
+                "type": "scene_image",
+                "data": {"url": url, "description": "Opening scene"},
+            })
+    except Exception:
+        logger.warning("Opening scene image failed, continuing without")
 
     # Generate opening cinematic video
     video_task = asyncio.create_task(_generate_opening_cinematic(session_id, session))

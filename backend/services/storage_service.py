@@ -60,10 +60,10 @@ async def upload_media(
     bucket = _get_bucket()
     blob = bucket.blob(blob_path)
     blob.upload_from_string(data, content_type=content_type)
-    blob.make_public()
 
+    public_url = f"https://storage.googleapis.com/{settings.STORAGE_BUCKET}/{blob_path}"
     logger.info("Uploaded %s to gs://%s/%s", media_type, settings.STORAGE_BUCKET, blob_path)
-    return blob.public_url
+    return public_url
 
 
 async def get_session_media(session_id: str, media_type: str = "") -> list[dict[str, str]]:
