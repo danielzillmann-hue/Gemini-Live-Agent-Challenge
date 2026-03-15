@@ -96,6 +96,32 @@ manager = ConnectionManager()
 # ── Wire up callbacks (avoids circular imports) ────────────────────────────
 
 async def _generate_scene_from_narration(session_id: str, session, narration: str) -> None:
+    """Generate a scene image — tries native interleaved first, falls back to Imagen."""
+    try:
+        # Try native interleaved: ask Gemini to generate just the image for this scene
+        parts = await gemini_service.generate_interleaved(
+            prompt=f"Generate a single illustration for this fantasy RPG scene (no text, just the image):\n\n{narration[:300]}",
+            system_instruction="Generate a detailed fantasy illustration matching the scene description. Dark fantasy art style, dramatic lighting.",
+        )
+        for part in parts:
+            if part["type"] == "image":
+                image_data = part["data"]
+                if isinstance(image_data, str):
+                    image_bytes = base64.b64decode(image_data)
+                else:
+                    image_bytes = image_data
+                url = await storage_service.upload_media(
+                    image_bytes, "image", part.get("mime_type", "image/png"), session_id
+                )
+                await manager.broadcast(session_id, {
+                    "type": "scene_image", "session_id": session_id,
+                    "data": {"url": url, "description": narration[:100]},
+                })
+                return  # Success — don't fall through
+    except Exception:
+        logger.debug("Interleaved scene generation failed, trying Imagen")
+
+    # Fallback: separate Imagen call
     try:
         scene_bytes = await media_service.generate_scene_image(
             scene_description=narration[:200],
@@ -213,21 +239,63 @@ async def list_campaigns():
 
 @app.get("/api/sessions/{session_id}/recap")
 async def get_session_recap(session_id: str):
+    """Generate a 'Previously on...' recap with interleaved text + image."""
     session = game_engine.get_session(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
 
     recap_text = game_engine.generate_session_recap(session)
-    try:
-        dramatic_recap = await gemini_service.generate_text(
-            prompt=f"Rewrite this as a dramatic 'Previously on...' narration in 3-4 sentences:\n\n{recap_text}",
-            system_instruction="You are a dramatic narrator. Write in present tense, vivid prose. Be concise but evocative.",
-            temperature=0.8, max_tokens=300,
-        )
-    except Exception:
-        dramatic_recap = recap_text
 
-    return {"recap": dramatic_recap, "raw": recap_text}
+    # Use native interleaved output for dramatic recap with illustration
+    try:
+        parts = await gemini_service.generate_interleaved(
+            prompt=(
+                f"Create a dramatic 'Previously on...' recap in 3-4 sentences, "
+                f"with an illustration of the most dramatic moment:\n\n{recap_text}"
+            ),
+            system_instruction=(
+                "You are a dramatic narrator creating a 'Previously on...' recap. "
+                "Write vivid prose in present tense. Generate one illustration showing "
+                "the most memorable moment from the recap."
+            ),
+        )
+
+        recap_narration = ""
+        recap_image = ""
+        for part in parts:
+            if part["type"] == "text":
+                recap_narration += part["content"]
+            elif part["type"] == "image":
+                try:
+                    image_data = part["data"]
+                    if isinstance(image_data, str):
+                        image_bytes = base64.b64decode(image_data)
+                    else:
+                        image_bytes = image_data
+                    recap_image = await storage_service.upload_media(
+                        image_bytes, "image", part.get("mime_type", "image/png"), session_id
+                    )
+                except Exception:
+                    pass
+
+        return {
+            "recap": recap_narration or recap_text,
+            "raw": recap_text,
+            "image_url": recap_image,
+            "interleaved": True,
+        }
+    except Exception:
+        # Fallback to text-only recap
+        try:
+            dramatic_recap = await gemini_service.generate_text(
+                prompt=f"Rewrite this as a dramatic 'Previously on...' narration in 3-4 sentences:\n\n{recap_text}",
+                system_instruction="You are a dramatic narrator. Write in present tense, vivid prose.",
+                temperature=0.8, max_tokens=300,
+            )
+        except Exception:
+            dramatic_recap = recap_text
+
+        return {"recap": dramatic_recap, "raw": recap_text, "image_url": "", "interleaved": False}
 
 
 class TTSRequest(BaseModel):
@@ -380,29 +448,81 @@ async def _handle_start_game(session_id: str, session) -> None:
     await manager.broadcast(session_id, {"type": "thinking", "data": {}})
 
     player_descriptions = ", ".join(f"{p.name} the {p.race.value} {p.character_class.value}" for p in session.players)
-    context = game_engine.get_context_summary(session)
 
-    opening_prompt = (
-        f"Begin the adventure! The party consists of: {player_descriptions}. "
-        f"Setting: {session.world.setting_description}. "
-        f"Create a dramatic opening scene. Use [NEW_SCENE] and [NPC_INTRO] tags."
+    # ── Native Interleaved Output ─────────────────────────────────────────
+    # Use Gemini's native multimodal capabilities to generate text + images
+    # in a single response stream — true interleaved storytelling output.
+
+    interleaved_prompt = (
+        f"Create a dramatic opening scene for a tabletop RPG campaign.\n\n"
+        f"Campaign: {session.world.campaign_name}\n"
+        f"Setting: {session.world.setting_description}\n"
+        f"Party: {player_descriptions}\n\n"
+        f"Write 3-4 paragraphs of vivid narration that sets the scene, introduces the "
+        f"starting location, and presents an immediate hook. Generate an illustration "
+        f"for the opening scene. Make it cinematic and immersive."
     )
 
-    tool_events = await process_player_input(session_id, opening_prompt, context)
-    from agents.orchestrator import process_tool_results
-    ws_messages = await process_tool_results(session_id, tool_events, session)
+    interleaved_parts = await gemini_service.generate_interleaved(
+        prompt=interleaved_prompt,
+        context=game_engine.get_context_summary(session),
+        temperature=0.9,
+    )
 
-    # Generate opening scene image
-    try:
-        scene_bytes = await media_service.generate_scene_image(
-            scene_description=f"Opening scene: {session.world.setting_description}",
-            time_of_day=session.world.time_of_day, weather=session.world.weather,
+    # Process interleaved parts — text becomes narration, images become scene images
+    ws_messages: list[dict[str, Any]] = []
+    for part in interleaved_parts:
+        if part["type"] == "text":
+            content = part["content"]
+            ws_messages.append({"type": "narration", "data": {"content": content}})
+            session.add_event(StoryEvent(
+                event_type="narration", content=content, speaker="narrator",
+                drama_level=game_engine.calculate_drama_level(session),
+            ))
+        elif part["type"] == "image":
+            try:
+                image_data = part["data"]
+                # Handle both bytes and base64-encoded strings
+                if isinstance(image_data, str):
+                    image_bytes = base64.b64decode(image_data)
+                else:
+                    image_bytes = image_data
+                mime = part.get("mime_type", "image/png")
+                ext = "png" if "png" in mime else "jpg"
+                url = await storage_service.upload_media(
+                    image_bytes, "image", mime, session_id
+                )
+                ws_messages.append({"type": "scene_image", "data": {"url": url, "description": "Opening scene"}})
+            except Exception:
+                logger.warning("Failed to upload interleaved image")
+
+    # If interleaved produced no images, generate one separately as fallback
+    has_image = any(m["type"] == "scene_image" for m in ws_messages)
+    if not has_image:
+        try:
+            scene_bytes = await media_service.generate_scene_image(
+                scene_description=f"Opening scene: {session.world.setting_description}",
+                time_of_day=session.world.time_of_day, weather=session.world.weather,
+            )
+            if scene_bytes:
+                url = await storage_service.upload_media(scene_bytes, "image", "image/png", session_id)
+                ws_messages.insert(0, {"type": "scene_image", "data": {"url": url, "description": "Opening scene"}})
+        except Exception:
+            logger.warning("Fallback opening scene image also failed")
+
+    # If interleaved produced no text, fall back to ADK agent pipeline
+    has_text = any(m["type"] == "narration" for m in ws_messages)
+    if not has_text:
+        context = game_engine.get_context_summary(session)
+        opening_prompt = (
+            f"Begin the adventure! Party: {player_descriptions}. "
+            f"Setting: {session.world.setting_description}. "
+            f"Create a dramatic opening scene."
         )
-        if scene_bytes:
-            url = await storage_service.upload_media(scene_bytes, "image", "image/png", session_id)
-            ws_messages.insert(0, {"type": "scene_image", "data": {"url": url, "description": "Opening scene"}})
-    except Exception:
-        logger.warning("Opening scene image failed")
+        tool_events = await process_player_input(session_id, opening_prompt, context)
+        from agents.orchestrator import process_tool_results
+        fallback_messages = await process_tool_results(session_id, tool_events, session)
+        ws_messages.extend(fallback_messages)
 
     # Generate world map in background
     asyncio.create_task(_generate_world_map(session))

@@ -230,6 +230,68 @@ async def generate_json(
         return {}
 
 
+async def generate_interleaved(
+    prompt: str,
+    system_instruction: str = "",
+    context: dict[str, Any] | None = None,
+    model: str | None = None,
+    temperature: float = 0.9,
+) -> list[dict[str, Any]]:
+    """Generate interleaved text + image output using Gemini's native multimodal capabilities.
+
+    Returns a list of parts, each either:
+      {"type": "text", "content": "..."} or
+      {"type": "image", "data": <bytes>, "mime_type": "image/png"}
+
+    This uses Gemini's native ability to produce text and images in a single
+    response stream — true interleaved multimodal output.
+    """
+    model_id = model or settings.GEMINI_MODEL
+
+    full_prompt = prompt
+    if context:
+        full_prompt = f"GAME CONTEXT:\n{json.dumps(context, indent=2, default=str)}\n\n{prompt}"
+
+    sys_instruction = system_instruction or (
+        "You are a cinematic narrator for a fantasy RPG. "
+        "Generate vivid narration text interleaved with scene illustrations. "
+        "When you describe a new scene or dramatic moment, generate an image inline. "
+        "Your text should flow naturally with images appearing at key visual moments."
+    )
+
+    try:
+        response = await _get_client().aio.models.generate_content(
+            model=model_id,
+            contents=full_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=sys_instruction,
+                temperature=temperature,
+                response_modalities=["TEXT", "IMAGE"],
+            ),
+        )
+
+        parts: list[dict[str, Any]] = []
+        if response.candidates:
+            for candidate in response.candidates:
+                if candidate.content and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if part.text:
+                            parts.append({"type": "text", "content": part.text})
+                        elif part.inline_data:
+                            parts.append({
+                                "type": "image",
+                                "data": part.inline_data.data,
+                                "mime_type": part.inline_data.mime_type or "image/png",
+                            })
+        return parts
+
+    except Exception as e:
+        logger.warning("Interleaved generation failed, falling back to text-only: %s", e)
+        # Fallback: generate text only
+        text = await generate_text(prompt, system_instruction or NARRATOR_SYSTEM_INSTRUCTION, context, model, temperature)
+        return [{"type": "text", "content": text}] if text else []
+
+
 async def analyze_image(
     image_bytes: bytes,
     prompt: str = "What do you see in this image? If there are dice, report the values shown.",
