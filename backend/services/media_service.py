@@ -8,14 +8,12 @@ import time
 import uuid
 from typing import Any
 
-from google import genai
 from google.genai import types
 
 from config import settings
+from services.gemini_service import _get_client
 
 logger = logging.getLogger(__name__)
-
-client = genai.Client()
 
 
 # ── Image Generation (Imagen) ─────────────────────────────────────────────
@@ -33,7 +31,7 @@ async def generate_image(
     full_prompt = f"{prompt}. {style_modifier}. {settings.ART_STYLE}".strip(". ")
 
     try:
-        response = await client.aio.models.generate_images(
+        response = await _get_client().aio.models.generate_images(
             model=settings.IMAGEN_MODEL,
             prompt=full_prompt,
             config=types.GenerateImagesConfig(
@@ -155,7 +153,7 @@ async def generate_video(
     full_prompt = f"{prompt}. {style_modifier}. {settings.ART_STYLE}, cinematic quality".strip(". ")
 
     try:
-        operation = await client.aio.models.generate_videos(
+        operation = await _get_client().aio.models.generate_videos(
             model=settings.VEO_MODEL,
             prompt=full_prompt,
             config=types.GenerateVideosConfig(

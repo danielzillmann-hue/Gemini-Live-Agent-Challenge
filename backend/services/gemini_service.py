@@ -14,7 +14,14 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-client = genai.Client()
+_client: genai.Client | None = None
+
+
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        _client = genai.Client(vertexai=True, project=settings.PROJECT_ID, location=settings.REGION)
+    return _client
 
 
 NARRATOR_SYSTEM_INSTRUCTION = """You are the Narrator — a masterful Game Master for an immersive tabletop RPG called Genesis.
@@ -156,7 +163,7 @@ async def generate_text(
     if context:
         full_prompt = f"GAME CONTEXT:\n{json.dumps(context, indent=2, default=str)}\n\nPLAYER INPUT:\n{prompt}"
 
-    response = await client.aio.models.generate_content(
+    response = await _get_client().aio.models.generate_content(
         model=model_id,
         contents=full_prompt,
         config=types.GenerateContentConfig(
@@ -182,7 +189,7 @@ async def generate_text_stream(
     if context:
         full_prompt = f"GAME CONTEXT:\n{json.dumps(context, indent=2, default=str)}\n\nPLAYER INPUT:\n{prompt}"
 
-    async for chunk in await client.aio.models.generate_content_stream(
+    async for chunk in await _get_client().aio.models.generate_content_stream(
         model=model_id,
         contents=full_prompt,
         config=types.GenerateContentConfig(
@@ -207,7 +214,7 @@ async def generate_json(
     if context:
         full_prompt = f"GAME CONTEXT:\n{json.dumps(context, indent=2, default=str)}\n\n{prompt}"
 
-    response = await client.aio.models.generate_content(
+    response = await _get_client().aio.models.generate_content(
         model=model_id,
         contents=full_prompt,
         config=types.GenerateContentConfig(
@@ -230,7 +237,7 @@ async def analyze_image(
 ) -> str:
     """Analyze an image using Gemini vision."""
     b64 = base64.b64encode(image_bytes).decode()
-    response = await client.aio.models.generate_content(
+    response = await _get_client().aio.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[
             types.Content(parts=[
