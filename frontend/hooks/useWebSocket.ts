@@ -5,7 +5,7 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080";
 
 export function useWebSocket(sessionId: string | null) {
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const { setConnected, handleWSMessage } = useGameStore();
 
   const connect = useCallback(() => {
