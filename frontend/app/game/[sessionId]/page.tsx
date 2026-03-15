@@ -18,6 +18,7 @@ import QuestLog from "@/components/QuestLog";
 import Inventory from "@/components/Inventory";
 import WorldMapPanel from "@/components/WorldMapPanel";
 import NPCJournal from "@/components/NPCJournal";
+import AudioManager from "@/components/AudioManager";
 import { api } from "@/lib/api";
 
 type SidePanel = "party" | "quests" | "inventory" | "map" | "npcs" | null;
@@ -126,6 +127,7 @@ export default function GamePage() {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-genesis-bg overflow-hidden">
+      <AudioManager />
       {/* ── Top Bar ──────────────────────────────────────────── */}
       <header className="h-12 flex items-center justify-between px-4 border-b border-genesis-border bg-genesis-panel/80 backdrop-blur-sm shrink-0">
         <div className="flex items-center gap-3">

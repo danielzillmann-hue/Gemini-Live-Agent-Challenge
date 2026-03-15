@@ -12,7 +12,7 @@ from google.adk.tools import FunctionTool
 from google.genai import types
 
 from config import settings
-from game.engine import GameEngine, game_engine, roll_dice, roll_d20, create_character
+from game.engine import CombatEngine, GameEngine, game_engine, roll_dice, roll_d20, create_character
 from game.models import (
     Character,
     CharacterClass,
@@ -503,74 +503,269 @@ async def process_tool_results(
                         "data": {"url": url, "description": args.get("description", "")},
                     })
 
-            elif name == "roll_check":
+            elif name == "narrate_scene":
+                # Narrate scene tool — emit as narration
+                scene_desc = args.get("scene", "")
+                if scene_desc:
+                    ws_messages.append({
+                        "type": "narration",
+                        "data": {"content": scene_desc},
+                    })
+
+            elif name in ("roll_check", "skill_check"):
+                # Apply dice roll results to character state
+                session = game_engine.get_session(session_id)
+                if session and not args.get("success", True):
+                    # On failed save/check, apply damage if specified
+                    damage = args.get("damage", 0)
+                    if damage:
+                        char_name = args.get("character", "")
+                        for p in session.players:
+                            if p.name.lower() == char_name.lower():
+                                p.hp = max(0, p.hp - damage)
+                                break
                 ws_messages.append({
                     "type": "dice_result",
                     "data": args,
                 })
 
             elif name == "start_combat_encounter":
-                ws_messages.append({
-                    "type": "combat_update",
-                    "data": {"action": "start", **args},
-                })
+                # Actually start combat in the game engine
+                session = game_engine.get_session(session_id)
+                if session:
+                    enemies_data = args.get("enemies", [])
+                    for enemy in enemies_data:
+                        npc = NPC(
+                            name=enemy.get("name", "Enemy"),
+                            description=enemy.get("description", ""),
+                            is_hostile=True,
+                            hp=int(10 + enemy.get("cr", 1) * 8),
+                            max_hp=int(10 + enemy.get("cr", 1) * 8),
+                            armor_class=int(10 + enemy.get("cr", 1) * 2),
+                            challenge_rating=enemy.get("cr", 1.0),
+                        )
+                        game_engine.add_npc(session_id, npc)
+
+                    enemy_ids = [
+                        nid for nid, n in session.world.npcs.items()
+                        if n.is_hostile and n.hp > 0
+                    ]
+                    combat_state = game_engine.start_combat(session_id, enemy_ids)
+                    if combat_state:
+                        ws_messages.append({
+                            "type": "combat_update",
+                            "data": combat_state.model_dump(mode="json"),
+                        })
+                        # Generate battle map
+                        try:
+                            map_bytes = await media_service.generate_battle_map(
+                                location_description=args.get("description", session.world.setting_description),
+                            )
+                            if map_bytes:
+                                map_url = await storage_service.upload_media(
+                                    map_bytes, "image", "image/png", session_id
+                                )
+                                ws_messages.append({
+                                    "type": "battle_map",
+                                    "data": {"url": map_url},
+                                })
+                        except Exception:
+                            logger.warning("Battle map generation failed")
 
             elif name == "resolve_combat_action":
-                ws_messages.append({
-                    "type": "combat_update",
-                    "data": {"action": "resolve", **args},
-                })
+                # Actually resolve combat through the engine
+                session = game_engine.get_session(session_id)
+                if session and session.combat.is_active:
+                    attacker_name = args.get("attacker", "")
+                    target_name = args.get("target", "")
+                    action_type = args.get("type", "attack")
+
+                    attacker = next(
+                        (c for c in session.combat.combatants if c.name.lower() == attacker_name.lower()), None
+                    )
+                    defender = next(
+                        (c for c in session.combat.combatants if c.name.lower() == target_name.lower()), None
+                    )
+
+                    if attacker and defender and action_type == "attack":
+                        result = CombatEngine.resolve_attack(attacker, defender)
+                        # Sync HP back to player/NPC models
+                        for p in session.players:
+                            matching = next((c for c in session.combat.combatants if c.id == p.id), None)
+                            if matching:
+                                p.hp = matching.hp
+                        for npc in session.world.npcs.values():
+                            matching = next((c for c in session.combat.combatants if c.id == npc.id), None)
+                            if matching:
+                                npc.hp = matching.hp
+
+                        ws_messages.append({
+                            "type": "dice_result",
+                            "data": {
+                                "character": result.actor_name,
+                                "roll_type": "d20",
+                                "value": result.roll,
+                                "is_critical": result.is_critical,
+                                "is_fumble": result.is_miss and result.roll == 1,
+                            },
+                        })
+                        ws_messages.append({
+                            "type": "combat_update",
+                            "data": session.combat.model_dump(mode="json"),
+                        })
+
+                    # Advance turn
+                    next_combatant = CombatEngine.next_turn(session.combat)
+                    if not session.combat.is_active:
+                        ws_messages.append({
+                            "type": "combat_update",
+                            "data": {"is_active": False, "phase": "ended"},
+                        })
+                else:
+                    ws_messages.append({
+                        "type": "combat_update",
+                        "data": {"action": "resolve", **args},
+                    })
 
             elif name == "create_npc":
-                portrait_bytes = await media_service.generate_character_portrait(
+                # Create NPC in game engine AND generate portrait
+                npc = NPC(
                     name=args.get("name", ""),
-                    race="human",
-                    character_class="commoner",
-                    appearance=args.get("description", ""),
+                    description=args.get("description", ""),
+                    personality=args.get("personality", ""),
+                    voice_style=args.get("voice_style", "neutral"),
+                    is_hostile=args.get("is_hostile", False),
+                    location=game_session.world.current_location_id,
                 )
+                game_engine.add_npc(session_id, npc)
+
                 portrait_url = ""
-                if portrait_bytes:
-                    portrait_url = await storage_service.upload_media(
-                        portrait_bytes, "image", "image/png", session_id
+                try:
+                    portrait_bytes = await media_service.generate_character_portrait(
+                        name=args.get("name", ""),
+                        race="human",
+                        character_class="commoner",
+                        appearance=args.get("description", ""),
                     )
+                    if portrait_bytes:
+                        portrait_url = await storage_service.upload_media(
+                            portrait_bytes, "image", "image/png", session_id
+                        )
+                        npc.portrait_url = portrait_url
+                except Exception:
+                    logger.warning("NPC portrait generation failed for %s", args.get("name"))
+
                 ws_messages.append({
                     "type": "npc_portrait",
                     "data": {
-                        "name": args.get("name", ""),
+                        "id": npc.id,
+                        "name": npc.name,
                         "portrait_url": portrait_url,
-                        "description": args.get("description", ""),
-                        "personality": args.get("personality", ""),
+                        "description": npc.description,
+                        "personality": npc.personality,
                     },
                 })
 
             elif name == "change_location":
-                scene_bytes = await media_service.generate_scene_image(
-                    scene_description=args.get("description", ""),
+                # Update backend state
+                loc = Location(
+                    name=args.get("name", ""),
+                    description=args.get("description", ""),
+                    location_type=args.get("type", "generic"),
+                    visited=True,
                 )
+                game_engine.add_location(session_id, loc)
+                game_engine.move_to_location(session_id, loc.id)
+
+                # Generate scene image
                 scene_url = ""
-                if scene_bytes:
-                    scene_url = await storage_service.upload_media(
-                        scene_bytes, "image", "image/png", session_id
+                try:
+                    scene_bytes = await media_service.generate_scene_image(
+                        scene_description=args.get("description", ""),
+                        time_of_day=game_session.world.time_of_day,
+                        weather=game_session.world.weather,
                     )
+                    if scene_bytes:
+                        scene_url = await storage_service.upload_media(
+                            scene_bytes, "image", "image/png", session_id
+                        )
+                        loc.image_url = scene_url
+                except Exception:
+                    logger.warning("Location scene generation failed")
+
                 ws_messages.append({
                     "type": "location_change",
                     "data": {
-                        "name": args.get("name", ""),
-                        "description": args.get("description", ""),
+                        "name": loc.name,
+                        "description": loc.description,
                         "image_url": scene_url,
+                        "location_id": loc.id,
                     },
                 })
 
             elif name == "update_quest":
+                # Update quest state in backend
+                session = game_engine.get_session(session_id)
+                if session:
+                    quest_title = args.get("quest", "")
+                    update_type = args.get("update", "progress")
+                    details = args.get("details", "")
+
+                    existing = next(
+                        (q for q in session.world.quests if q.title.lower() == quest_title.lower()),
+                        None,
+                    )
+                    if existing:
+                        if update_type == "complete":
+                            existing.is_complete = True
+                            existing.is_active = False
+                            # Award rewards
+                            for p in session.players:
+                                p.xp += existing.reward_xp
+                                p.gold += existing.reward_gold
+                        elif update_type == "progress" and details:
+                            # Mark next objective complete
+                            for i, obj in enumerate(existing.objectives):
+                                if i not in existing.completed_objectives:
+                                    existing.completed_objectives.append(i)
+                                    break
+                    elif update_type == "new" or not existing:
+                        # Create new quest
+                        new_quest = Quest(
+                            title=quest_title,
+                            description=details,
+                            objectives=[details] if details else [],
+                        )
+                        game_engine.add_quest(session_id, new_quest)
+
                 ws_messages.append({
                     "type": "quest_update",
-                    "data": args,
+                    "data": {
+                        **args,
+                        "quests": [q.model_dump(mode="json") for q in session.world.quests] if session else [],
+                    },
                 })
 
             elif name == "update_world_state":
+                # Actually update backend world state
+                session = game_engine.get_session(session_id)
+                if session:
+                    if args.get("time_of_day"):
+                        session.world.time_of_day = args["time_of_day"]
+                    if args.get("weather"):
+                        session.world.weather = args["weather"]
+                    if args.get("advance_day"):
+                        session.world.day_count += 1
+                    if args.get("event"):
+                        session.world.global_events.append(args["event"])
+
                 ws_messages.append({
                     "type": "world_update",
-                    "data": args,
+                    "data": {
+                        "time_of_day": session.world.time_of_day if session else "",
+                        "weather": session.world.weather if session else "",
+                        "day_count": session.world.day_count if session else 1,
+                    },
                 })
 
             elif name == "set_music_mood":

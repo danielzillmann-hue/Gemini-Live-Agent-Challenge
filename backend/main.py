@@ -114,8 +114,7 @@ async def create_session(req: CreateSessionRequest):
     """Create a new game session."""
     session = game_engine.create_session(req.campaign_name, req.setting)
 
-    # Generate world map in background
-    asyncio.create_task(_generate_world_map(session))
+    # World map is generated when game starts (after locations exist)
 
     return {
         "session_id": session.id,
@@ -459,7 +458,8 @@ async def _handle_start_game(session_id: str, session: GameSession) -> None:
     except Exception:
         logger.warning("Opening scene image failed, continuing without")
 
-    # Generate opening cinematic video
+    # Generate world map and opening cinematic in background
+    asyncio.create_task(_generate_world_map(session))
     video_task = asyncio.create_task(_generate_opening_cinematic(session_id, session))
 
     for msg in ws_messages:

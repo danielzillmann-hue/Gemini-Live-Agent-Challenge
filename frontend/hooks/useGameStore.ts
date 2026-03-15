@@ -242,6 +242,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
           type: "system",
           content: `Quest: ${data.quest as string} — ${data.update as string}`,
         });
+        // Update quests list if provided
+        if (data.quests) {
+          store.updateQuests(data.quests as Quest[]);
+        }
         break;
 
       case "location_change":
@@ -252,6 +256,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
           type: "system",
           content: `Arrived at ${data.name as string}`,
         });
+        break;
+
+      case "world_update":
+        // Update world state (time, weather, day)
+        if (store.world) {
+          set({
+            world: {
+              ...store.world,
+              time_of_day: (data.time_of_day as string) || store.world.time_of_day,
+              weather: (data.weather as string) || store.world.weather,
+              day_count: (data.day_count as number) || store.world.day_count,
+            },
+          });
+        }
         break;
 
       case "game_state_sync":
