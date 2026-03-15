@@ -71,16 +71,6 @@ export default function ChatPanel({ send, myName }: ChatPanelProps) {
     [voiceActive, myName]
   );
 
-  // Listen for WebRTC signals
-  useEffect(() => {
-    const store = useGameStore;
-    const unsub = store.subscribe((state, prevState) => {
-      // Check for new webrtc_signal messages in storyLog — not ideal
-      // Instead we handle in the WebSocket directly
-    });
-    return unsub;
-  }, []);
-
   // Register signal handler on the WebSocket
   useEffect(() => {
     const origHandler = useGameStore.getState().handleWSMessage;
@@ -94,6 +84,12 @@ export default function ChatPanel({ send, myName }: ChatPanelProps) {
 
     return () => {
       useGameStore.setState({ handleWSMessage: origHandler });
+      // Clean up all WebRTC resources on unmount
+      peerConnections.current.forEach((pc) => pc.close());
+      peerConnections.current.clear();
+      audioElements.current.forEach((a) => a.pause());
+      audioElements.current.clear();
+      localStream.current?.getTracks().forEach((t) => t.stop());
     };
   }, [handleSignal]);
 

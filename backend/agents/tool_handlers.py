@@ -10,14 +10,14 @@ from typing import Any
 
 from game.engine import CombatEngine, game_engine
 from game.models import (
-    Achievement, Faction, Item, Location, LoreEntry, NPC, Quest,
+    Achievement, Faction, GameSession, Item, Location, LoreEntry, NPC, Quest,
 )
 from services import media_service, storage_service
 
 logger = logging.getLogger(__name__)
 
 
-async def handle_narrate_scene(session_id: str, args: dict, session: Any) -> list[dict]:
+async def handle_narrate_scene(session_id: str, args: dict[str, Any], session: GameSession | None) -> list[dict[str, Any]]:
     scene_desc = args.get("scene", "")
     if scene_desc:
         return [{"type": "narration", "data": {"content": scene_desc}}]

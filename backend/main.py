@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from config import settings
 from game.engine import game_engine, create_character
@@ -49,31 +49,45 @@ app.add_middleware(
 class ConnectionManager:
     def __init__(self) -> None:
         self.active: dict[str, list[WebSocket]] = {}
+        self._lock = asyncio.Lock()
 
     async def connect(self, session_id: str, ws: WebSocket) -> None:
         await ws.accept()
-        self.active.setdefault(session_id, []).append(ws)
-        count = len(self.active[session_id])
+        async with self._lock:
+            self.active.setdefault(session_id, []).append(ws)
+            count = len(self.active[session_id])
         logger.info("Player connected to session %s (%d total)", session_id, count)
         await self.broadcast(session_id, {"type": "players_online", "data": {"count": count}})
 
     async def disconnect(self, session_id: str, ws: WebSocket) -> None:
-        if session_id in self.active:
-            self.active[session_id] = [w for w in self.active[session_id] if w is not ws]
-            if not self.active[session_id]:
-                del self.active[session_id]
-            else:
-                await self.broadcast(session_id, {"type": "players_online", "data": {"count": len(self.active[session_id])}})
+        async with self._lock:
+            if session_id in self.active:
+                self.active[session_id] = [w for w in self.active[session_id] if w is not ws]
+                if not self.active[session_id]:
+                    del self.active[session_id]
+                    return
+                count = len(self.active[session_id])
+        await self.broadcast(session_id, {"type": "players_online", "data": {"count": count}})
 
     async def broadcast(self, session_id: str, message: dict[str, Any]) -> None:
-        for ws in self.active.get(session_id, []):
+        connections = list(self.active.get(session_id, []))
+        failed: list[WebSocket] = []
+        for ws in connections:
             try:
                 await ws.send_json(message)
             except Exception:
-                pass
+                failed.append(ws)
+        # Clean up dead connections
+        if failed:
+            async with self._lock:
+                if session_id in self.active:
+                    self.active[session_id] = [w for w in self.active[session_id] if w not in failed]
 
     async def send_personal(self, ws: WebSocket, message: dict[str, Any]) -> None:
-        await ws.send_json(message)
+        try:
+            await ws.send_json(message)
+        except Exception:
+            logger.debug("Failed to send personal message")
 
 
 manager = ConnectionManager()
@@ -105,18 +119,18 @@ action_window.set_callbacks(manager.broadcast, handle_batched_actions)
 # ── REST API ───────────────────────────────────────────────────────────────
 
 class CreateSessionRequest(BaseModel):
-    campaign_name: str = "New Campaign"
-    setting: str = "A dark fantasy world of magic and danger"
+    campaign_name: str = Field("New Campaign", min_length=1, max_length=200)
+    setting: str = Field("A dark fantasy world of magic and danger", min_length=1, max_length=2000)
 
 
 class CreateCharacterRequest(BaseModel):
-    session_id: str
-    name: str
+    session_id: str = Field(..., min_length=1, max_length=50)
+    name: str = Field(..., min_length=1, max_length=100)
     race: CharacterRace = CharacterRace.HUMAN
     character_class: CharacterClass = CharacterClass.WARRIOR
-    backstory: str = ""
-    personality: str = ""
-    appearance: str = ""
+    backstory: str = Field("", max_length=1000)
+    personality: str = Field("", max_length=500)
+    appearance: str = Field("", max_length=500)
 
 
 @app.get("/")

@@ -430,6 +430,8 @@ class GameSession(BaseModel):
 
     def add_event(self, event: StoryEvent) -> None:
         self.story_events.append(event)
+        if len(self.story_events) > 500:
+            self.story_events = self.story_events[-500:]
         self.updated_at = datetime.utcnow()
 
     def get_recent_events(self, n: int = 20) -> list[StoryEvent]:

@@ -29,7 +29,7 @@ class ActionWindow:
         self.window_timers: dict[str, asyncio.Task] = {}
         self.is_processing: dict[str, bool] = {}
         self.submitted: dict[str, set[str]] = {}
-        # These are set externally after initialization
+        self._lock = asyncio.Lock()
         self._broadcast = None
         self._process_batch = None
 
@@ -55,6 +55,13 @@ class ActionWindow:
         character_name: str, action_text: str,
     ) -> str | None:
         """Submit a player action. Returns error message or None on success."""
+        async with self._lock:
+            return await self._submit_action_locked(session_id, session, character_name, action_text)
+
+    async def _submit_action_locked(
+        self, session_id: str, session: GameSession,
+        character_name: str, action_text: str,
+    ) -> str | None:
         if self.is_busy(session_id):
             return "The Game Master is still narrating. Please wait."
 
