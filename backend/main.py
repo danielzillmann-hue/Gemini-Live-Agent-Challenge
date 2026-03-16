@@ -126,10 +126,12 @@ async def _generate_scene_from_narration(session_id: str, session, narration: st
     except Exception:
         logger.debug("Interleaved scene generation failed, trying Imagen")
 
-    # Fallback: separate Imagen call
+    # Fallback: separate Imagen call with cleaned-up prompt
     try:
+        # Strip story tags and clean up for image generation
+        clean = narration.replace("[NEW_SCENE]", "").replace("[CINEMATIC]", "").strip()
         scene_bytes = await media_service.generate_scene_image(
-            scene_description=narration[:200],
+            scene_description=f"Fantasy RPG scene: {clean[:300]}",
             time_of_day=session.world.time_of_day,
             weather=session.world.weather,
         )
@@ -687,17 +689,20 @@ async def _handle_start_game(session_id: str, session) -> None:
             except Exception:
                 logger.warning("Failed to upload interleaved image")
 
-    # If interleaved produced no images, generate one separately as fallback
+    # If interleaved produced no images, generate one from the actual narration text
     has_image = any(m["type"] == "scene_image" for m in ws_messages)
     if not has_image:
+        # Extract narration text to use as image prompt (much better than generic setting)
+        narration_texts = [m["data"]["content"] for m in ws_messages if m["type"] == "narration"]
+        scene_prompt = " ".join(narration_texts)[:400] if narration_texts else session.world.setting_description
         try:
             scene_bytes = await media_service.generate_scene_image(
-                scene_description=f"Opening scene: {session.world.setting_description}",
+                scene_description=f"Fantasy RPG scene illustration: {scene_prompt}",
                 time_of_day=session.world.time_of_day, weather=session.world.weather,
             )
             if scene_bytes:
                 url = await storage_service.upload_media(scene_bytes, "image", "image/png", session_id)
-                ws_messages.insert(0, {"type": "scene_image", "data": {"url": url, "description": "Opening scene"}})
+                ws_messages.insert(0, {"type": "scene_image", "data": {"url": url, "description": scene_prompt[:100]}})
         except Exception:
             logger.warning("Fallback opening scene image also failed")
 
