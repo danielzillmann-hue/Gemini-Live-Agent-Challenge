@@ -128,6 +128,19 @@ export default function LiveVoice({
     }
   }
 
+  // Shared playback context for smooth audio (Gemini outputs 24kHz PCM)
+  const playbackCtxRef = useRef<AudioContext | null>(null);
+  const playbackQueue = useRef<AudioBuffer[]>([]);
+  const isPlayingAudio = useRef(false);
+  const nextPlayTime = useRef(0);
+
+  function getPlaybackCtx(): AudioContext {
+    if (!playbackCtxRef.current || playbackCtxRef.current.state === "closed") {
+      playbackCtxRef.current = new AudioContext({ sampleRate: 24000 });
+    }
+    return playbackCtxRef.current;
+  }
+
   async function playAudio(base64Audio: string) {
     try {
       const binaryStr = atob(base64Audio);
@@ -136,21 +149,28 @@ export default function LiveVoice({
         bytes[i] = binaryStr.charCodeAt(i);
       }
 
-      // PCM 16-bit 16kHz mono → AudioBuffer
-      const audioContext = new AudioContext({ sampleRate: 16000 });
+      // Gemini Live API outputs 24kHz 16-bit PCM mono
+      const ctx = getPlaybackCtx();
       const int16 = new Int16Array(bytes.buffer);
       const float32 = new Float32Array(int16.length);
       for (let i = 0; i < int16.length; i++) {
         float32[i] = int16[i] / 0x8000;
       }
 
-      const audioBuffer = audioContext.createBuffer(1, float32.length, 16000);
+      const audioBuffer = ctx.createBuffer(1, float32.length, 24000);
       audioBuffer.getChannelData(0).set(float32);
 
-      const source = audioContext.createBufferSource();
+      // Schedule chunks sequentially for gapless playback
+      const now = ctx.currentTime;
+      if (nextPlayTime.current < now) {
+        nextPlayTime.current = now;
+      }
+
+      const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
-      source.connect(audioContext.destination);
-      source.start();
+      source.connect(ctx.destination);
+      source.start(nextPlayTime.current);
+      nextPlayTime.current += audioBuffer.duration;
     } catch (err) {
       console.error("Audio playback error:", err);
     }
@@ -168,6 +188,10 @@ export default function LiveVoice({
     processorRef.current?.disconnect();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     audioContextRef.current?.close();
+    // Stop playback
+    playbackCtxRef.current?.close();
+    playbackCtxRef.current = null;
+    nextPlayTime.current = 0;
 
     setIsActive(false);
     // Don't clear error status — let user see what went wrong
