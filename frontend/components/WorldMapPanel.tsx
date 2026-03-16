@@ -133,7 +133,7 @@ export default function WorldMapPanel() {
                 Factions
               </div>
               <div className="space-y-1">
-                {Object.values(world.factions as Record<string, any>).map((faction: any) => (
+                {Object.values(world.factions).map((faction) => (
                   <div key={faction.id || faction.name} className="genesis-panel p-2">
                     <div className="text-genesis-text text-xs font-display tracking-wider">
                       {faction.name}
@@ -145,18 +145,18 @@ export default function WorldMapPanel() {
                     )}
                     {faction.reputation && Object.keys(faction.reputation).length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
-                        {Object.entries(faction.reputation as Record<string, number>).map(([char, rep]) => (
+                        {Object.entries(faction.reputation).map(([char, rep]) => (
                           <span
                             key={char}
                             className={`text-[9px] px-1 py-0.5 rounded ${
-                              (rep as number) > 0
+                              rep > 0
                                 ? "bg-genesis-green/15 text-genesis-green"
-                                : (rep as number) < 0
+                                : rep < 0
                                   ? "bg-genesis-red/15 text-genesis-red"
                                   : "bg-genesis-bg text-genesis-text-dim"
                             }`}
                           >
-                            {char}: {(rep as number) > 0 ? "+" : ""}{rep as number}
+                            {char}: {rep > 0 ? "+" : ""}{rep as number}
                           </span>
                         ))}
                       </div>

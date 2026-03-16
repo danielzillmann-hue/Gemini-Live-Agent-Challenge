@@ -107,12 +107,23 @@ export interface CombatState {
   battle_map_url: string;
 }
 
+export interface Faction {
+  id: string;
+  name: string;
+  description: string;
+  reputation: Record<string, number>;
+  relationships: Record<string, number>;
+  leader: string;
+  territory: string[];
+}
+
 export interface WorldState {
   campaign_name: string;
   setting_description: string;
   world_map_url: string;
   locations: Record<string, Location>;
   npcs: Record<string, NPC>;
+  factions: Record<string, Faction>;
   quests: Quest[];
   current_location_id: string;
   time_of_day: string;
