@@ -211,6 +211,27 @@ async def list_sessions():
     ]
 
 
+@app.post("/api/settings/model")
+async def set_model(data: dict[str, Any]):
+    """Switch between Flash (fast) and Pro (quality) models at runtime."""
+    model = data.get("model", "flash")
+    if model == "pro":
+        settings.GEMINI_MODEL = settings.GEMINI_PRO_MODEL
+    else:
+        settings.GEMINI_MODEL = settings.GEMINI_FLASH_MODEL
+    # Rebuild the agent with the new model
+    from agents.orchestrator import genesis_agent
+    genesis_agent.model = settings.GEMINI_MODEL
+    logger.info("Switched orchestrator model to %s", settings.GEMINI_MODEL)
+    return {"model": settings.GEMINI_MODEL}
+
+
+@app.get("/api/settings/model")
+async def get_model():
+    """Get the current model."""
+    return {"model": settings.GEMINI_MODEL}
+
+
 @app.post("/api/sessions/{session_id}/characters")
 async def add_character(session_id: str, req: CreateCharacterRequest):
     session = game_engine.get_session(session_id)

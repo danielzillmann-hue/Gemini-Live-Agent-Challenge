@@ -7,8 +7,9 @@ load_dotenv()
 class Settings:
     PROJECT_ID: str = os.getenv("GOOGLE_CLOUD_PROJECT", "genesis-rpg")
     REGION: str = os.getenv("GOOGLE_CLOUD_REGION", "us-central1")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     GEMINI_FLASH_MODEL: str = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
+    GEMINI_PRO_MODEL: str = os.getenv("GEMINI_PRO_MODEL", "gemini-2.5-pro")
     IMAGEN_MODEL: str = os.getenv("IMAGEN_MODEL", "imagen-3.0-generate-002")
     VEO_MODEL: str = os.getenv("VEO_MODEL", "veo-2.0-generate-001")
 
