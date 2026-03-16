@@ -175,8 +175,10 @@ export interface DiceResult {
   character: string;
   roll_type: string;
   value: number;
+  roll?: number; // Raw d20 value (alias for value)
   total?: number;
   dc?: number;
+  ability?: string;
   success?: boolean;
   is_critical: boolean;
   is_fumble: boolean;

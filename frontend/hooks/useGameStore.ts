@@ -249,18 +249,28 @@ export const useGameStore = create<GameStore>((set, get) => ({
         if (data.combatants) {
           store.setCombat(data as unknown as CombatState);
         }
-        store.addStoryEntry({
-          type: "combat",
-          content: (data.description as string) || "Combat update",
-        });
+        // Only show combat updates that have meaningful info
+        if (data.is_active === false) {
+          store.addStoryEntry({ type: "combat", content: "Combat has ended!" });
+        } else if (data.round_number && data.combatants) {
+          store.addStoryEntry({ type: "combat", content: `Combat — Round ${data.round_number as number}` });
+        }
         break;
 
       case "dice_result": {
         const dice = data as unknown as DiceResult;
+        const value = dice.value || dice.roll;
+        const total = dice.total || value;
+        const dc = dice.dc;
+        let rollText = `${dice.character || "?"} rolled ${value || "?"}`;
+        if (total && total !== value) rollText += ` (total: ${total})`;
+        if (dc) rollText += ` vs DC ${dc} — ${dice.success ? "Success!" : "Failed!"}`;
+        if (dice.is_critical) rollText = `${dice.character || "?"} rolled NATURAL 20 — CRITICAL HIT!`;
+        if (dice.is_fumble) rollText = `${dice.character || "?"} rolled NATURAL 1 — Critical Failure!`;
         store.addStoryEntry({
           type: "dice",
-          content: `${dice.character} rolled ${dice.value}${dice.is_critical ? " — CRITICAL!" : dice.is_fumble ? " — Critical Failure!" : ""}`,
-          diceResult: dice,
+          content: rollText,
+          diceResult: { ...dice, value: value || 0 },
         });
         break;
       }

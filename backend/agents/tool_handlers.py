@@ -153,10 +153,30 @@ async def handle_resolve_combat(session_id: str, args: dict, session: Any) -> li
                 if p.id == attacker.id:
                     p.crits += 1
 
+        # Show attack roll result
         messages.append({"type": "dice_result", "data": {
-            "character": result.actor_name, "roll_type": "d20", "value": result.roll,
-            "is_critical": result.is_critical, "is_fumble": result.is_miss and result.roll == 1,
+            "character": result.actor_name,
+            "roll_type": "d20",
+            "value": result.roll,
+            "total": result.roll,
+            "dc": defender.armor_class,
+            "success": not result.is_miss,
+            "is_critical": result.is_critical,
+            "is_fumble": result.is_miss and result.roll == 1,
+            "ability": "attack",
         }})
+        # Show damage/miss narration
+        if result.is_miss:
+            messages.append({"type": "narration", "data": {
+                "content": f"{result.actor_name} swings at {result.target_name} but misses! (rolled {result.roll} vs AC {defender.armor_class})",
+            }})
+        else:
+            dmg_text = f"{result.damage} damage"
+            if result.is_critical:
+                dmg_text += " — CRITICAL HIT!"
+            messages.append({"type": "narration", "data": {
+                "content": f"{result.actor_name} hits {result.target_name} for {dmg_text}! (rolled {result.roll} vs AC {defender.armor_class}){' ' + result.target_name + ' falls!' if defender.hp <= 0 else ' (' + str(defender.hp) + '/' + str(defender.max_hp) + ' HP remaining)'}",
+            }})
         messages.append({"type": "combat_update", "data": session.combat.model_dump(mode="json")})
 
     next_combatant = CombatEngine.next_turn(session.combat)
