@@ -205,10 +205,34 @@ async def get_session(session_id: str):
 
 @app.get("/api/sessions")
 async def list_sessions():
-    return [
-        {"id": sid, "campaign_name": s.world.campaign_name, "player_count": len(s.players), "is_active": s.is_active}
-        for sid, s in game_engine.sessions.items()
-    ]
+    """List sessions from both memory and Firestore."""
+    # Merge in-memory sessions with Firestore saved sessions
+    sessions: dict[str, dict] = {}
+
+    # In-memory sessions (currently active)
+    for sid, s in game_engine.sessions.items():
+        sessions[sid] = {
+            "id": sid,
+            "campaign_name": s.world.campaign_name,
+            "player_count": len(s.players),
+            "is_active": True,
+        }
+
+    # Firestore sessions (persisted)
+    try:
+        saved = await firestore_service.list_sessions()
+        for s in saved:
+            if s["id"] not in sessions:
+                sessions[s["id"]] = {
+                    "id": s["id"],
+                    "campaign_name": s.get("campaign_name", "Saved Campaign"),
+                    "player_count": s.get("player_count", 0),
+                    "is_active": s["id"] in game_engine.sessions,
+                }
+    except Exception:
+        logger.debug("Failed to list Firestore sessions")
+
+    return list(sessions.values())
 
 
 @app.post("/api/settings/model")
