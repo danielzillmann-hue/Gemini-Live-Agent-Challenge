@@ -600,6 +600,8 @@ async def websocket_game(ws: WebSocket, session_id: str):
                 await manager.broadcast(session_id, {"type": "player_chat", "data": msg_data})
             elif msg_type == "webrtc_signal":
                 await manager.broadcast(session_id, {"type": "webrtc_signal", "data": msg_data})
+            elif msg_type == "ping":
+                await manager.send_personal(ws, {"type": "pong", "data": {}})
 
     except WebSocketDisconnect:
         await manager.disconnect(session_id, ws)

@@ -2,11 +2,13 @@ import { useEffect, useRef, useCallback } from "react";
 import { useGameStore } from "./useGameStore";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080";
-const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
+const MAX_RECONNECT_DELAY = 30000;
+const PING_INTERVAL = 30000; // Send ping every 30 seconds to keep connection alive
 
 export function useWebSocket(sessionId: string | null) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const pingTimer = useRef<ReturnType<typeof setInterval>>(undefined);
   const reconnectAttempts = useRef(0);
   const { setConnected, handleWSMessage } = useGameStore();
 
@@ -17,24 +19,26 @@ export function useWebSocket(sessionId: string | null) {
     const ws = new WebSocket(`${WS_URL}/ws/${sessionId}`);
 
     ws.onopen = () => {
-      const wasReconnect = reconnectAttempts.current > 0;
       setConnected(true);
       reconnectAttempts.current = 0;
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
       }
-      // Notify user of reconnection (session may have been restored from Firestore)
-      if (wasReconnect) {
-        handleWSMessage({
-          type: "system_notice",
-          data: { message: "Reconnected to server. Session restored." },
-        });
-      }
+
+      // Start keep-alive pings to prevent Cloud Run timeout
+      if (pingTimer.current) clearInterval(pingTimer.current);
+      pingTimer.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "ping", data: {} }));
+        }
+      }, PING_INTERVAL);
     };
 
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
+        // Ignore pong responses
+        if (msg.type === "pong") return;
         handleWSMessage(msg);
       } catch {
         console.error("Failed to parse WebSocket message");
@@ -43,7 +47,8 @@ export function useWebSocket(sessionId: string | null) {
 
     ws.onclose = () => {
       setConnected(false);
-      // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s max
+      if (pingTimer.current) clearInterval(pingTimer.current);
+
       const delay = Math.min(
         1000 * Math.pow(2, reconnectAttempts.current),
         MAX_RECONNECT_DELAY
@@ -65,6 +70,7 @@ export function useWebSocket(sessionId: string | null) {
     connect();
     return () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (pingTimer.current) clearInterval(pingTimer.current);
       wsRef.current?.close();
     };
   }, [connect]);
