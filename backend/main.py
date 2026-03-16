@@ -101,13 +101,54 @@ pending_dice_rolls: dict[str, dict[str, Any]] = {}  # session_id -> roll info
 
 # ── Wire up callbacks (avoids circular imports) ────────────────────────────
 
-async def _generate_scene_from_narration(session_id: str, session, narration: str) -> None:
-    """Generate a scene image — tries native interleaved first, falls back to Imagen."""
+async def _narration_to_image_prompt(narration: str) -> str:
+    """Convert story narration into a visual scene description for image generation.
+
+    Narration: "The air thickens as you approach the fallen figure. The man lies
+    sprawled, face contorted in a silent scream..."
+
+    Image prompt: "A dark forest clearing at dawn. A dead man lies on the ground
+    beneath a gnarled oak tree, face frozen in terror. Dark stain on his tunic.
+    Misty, ominous atmosphere. Dark fantasy art style."
+    """
     try:
-        # Try native interleaved: ask Gemini to generate just the image for this scene
+        prompt = await gemini_service.generate_text(
+            prompt=(
+                "Convert this RPG narration into a concise visual scene description "
+                "for an AI image generator. Focus ONLY on what a painter would see: "
+                "the setting, characters' physical positions, lighting, mood, and key "
+                "visual elements. Remove all dialogue, thoughts, game mechanics, and "
+                "abstract concepts. Be specific about what is physically visible.\n\n"
+                f"Narration:\n{narration[:500]}\n\n"
+                "Visual scene description (2-3 sentences):"
+            ),
+            system_instruction=(
+                "You convert story text into image generation prompts. "
+                "Output ONLY the visual description, nothing else. "
+                "Be concrete: 'a dead man on a forest floor' not 'a fallen figure'. "
+                "Include: setting, characters, lighting, mood, time of day."
+            ),
+            model=settings.GEMINI_FLASH_MODEL,
+            temperature=0.3,
+            max_tokens=150,
+        )
+        return prompt.strip() if prompt else narration[:300]
+    except Exception:
+        return narration[:300]
+
+
+async def _generate_scene_from_narration(session_id: str, session, narration: str) -> None:
+    """Generate a scene image — rewrites narration into image prompt first."""
+    # Step 1: Convert narration prose into a visual image prompt
+    clean = narration.replace("[NEW_SCENE]", "").replace("[CINEMATIC]", "").strip()
+    image_prompt = await _narration_to_image_prompt(clean)
+    logger.info("Image prompt for scene: %s", image_prompt[:100])
+
+    # Step 2: Try native interleaved generation
+    try:
         parts = await gemini_service.generate_interleaved(
-            prompt=f"Generate a single illustration for this fantasy RPG scene (no text, just the image):\n\n{narration[:300]}",
-            system_instruction="Generate a detailed fantasy illustration matching the scene description. Dark fantasy art style, dramatic lighting.",
+            prompt=f"Generate a single illustration for this scene (no text, just the image):\n\n{image_prompt}",
+            system_instruction="Generate a detailed fantasy illustration. Dark fantasy art style, dramatic lighting, cinematic composition.",
         )
         for part in parts:
             if part["type"] == "image":
@@ -121,18 +162,16 @@ async def _generate_scene_from_narration(session_id: str, session, narration: st
                 )
                 await manager.broadcast(session_id, {
                     "type": "scene_image", "session_id": session_id,
-                    "data": {"url": url, "description": narration[:100]},
+                    "data": {"url": url, "description": image_prompt[:100]},
                 })
-                return  # Success — don't fall through
+                return
     except Exception:
         logger.debug("Interleaved scene generation failed, trying Imagen")
 
-    # Fallback: separate Imagen call with cleaned-up prompt
+    # Step 3: Fallback to Imagen with the rewritten prompt
     try:
-        # Strip story tags and clean up for image generation
-        clean = narration.replace("[NEW_SCENE]", "").replace("[CINEMATIC]", "").strip()
         scene_bytes = await media_service.generate_scene_image(
-            scene_description=f"Fantasy RPG scene: {clean[:300]}",
+            scene_description=f"Fantasy RPG illustration: {image_prompt}",
             time_of_day=session.world.time_of_day,
             weather=session.world.weather,
         )
