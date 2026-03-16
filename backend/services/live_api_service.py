@@ -19,7 +19,7 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-LIVE_MODEL = "gemini-2.5-flash-native-audio"
+LIVE_MODEL = "gemini-live-2.5-flash-native-audio"
 
 
 async def create_live_session(
@@ -64,13 +64,22 @@ async def create_live_session(
         f"If they ask for help, respond in character."
     )
 
-    config = types.LiveConnectConfig(
-        response_modalities=["AUDIO"],
-        system_instruction=types.Content(
-            parts=[types.Part(text=system_instruction)]
-        ),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-    )
+    try:
+        config = types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            system_instruction=types.Content(
+                parts=[types.Part(text=system_instruction)]
+            ),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+        )
+    except (AttributeError, TypeError):
+        # Fallback if AudioTranscriptionConfig not available in SDK version
+        config = types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            system_instruction=types.Content(
+                parts=[types.Part(text=system_instruction)]
+            ),
+        )
 
     return client.aio.live.connect(model=LIVE_MODEL, config=config)
 

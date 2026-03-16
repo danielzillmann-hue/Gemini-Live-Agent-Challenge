@@ -63,12 +63,15 @@ export default function LiveVoice({
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        if (event.code !== 1000) {
+          setStatus("Voice chat unavailable — NPC will respond via text");
+        }
         stopConversation();
       };
 
       ws.onerror = () => {
-        setStatus("Connection failed");
+        setStatus("Voice chat unavailable");
         stopConversation();
       };
     } catch (err) {
@@ -167,7 +170,8 @@ export default function LiveVoice({
     audioContextRef.current?.close();
 
     setIsActive(false);
-    setStatus("");
+    // Don't clear error status — let user see what went wrong
+    setStatus((prev) => prev.startsWith("Error") || prev.includes("unavailable") ? prev : "");
     onEnd?.();
   }
 
