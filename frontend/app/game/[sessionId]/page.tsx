@@ -35,6 +35,7 @@ export default function GamePage() {
   const [gameStarted, setGameStarted] = useState(false);
   const [myCharacterName, setMyCharacterName] = useState<string>("");
   const [needsCharacter, setNeedsCharacter] = useState(false);
+  const [aiModel, setAiModel] = useState<"flash" | "pro">("flash");
   const hasCheckedCharacter = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -160,6 +161,21 @@ export default function GamePage() {
     }
   }
 
+  async function toggleModel() {
+    const newModel = aiModel === "flash" ? "pro" : "flash";
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+      await fetch(`${API_URL}/api/settings/model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: newModel }),
+      });
+      setAiModel(newModel);
+    } catch {
+      console.error("Failed to switch model");
+    }
+  }
+
   async function handleSave() {
     try {
       await api.saveSession(sessionId);
@@ -229,7 +245,18 @@ export default function GamePage() {
           )}
           <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-genesis-green" : "bg-genesis-red"}`} />
           <span>{isConnected ? "Connected" : "Disconnected"}</span>
-          <button onClick={handleSave} className="ml-3 p-1.5 hover:text-genesis-accent transition-colors" title="Save Game">
+          <button
+            onClick={toggleModel}
+            className={`ml-2 px-2 py-0.5 rounded text-[10px] font-display tracking-wider transition-all ${
+              aiModel === "pro"
+                ? "bg-genesis-purple/20 text-genesis-purple border border-genesis-purple/40"
+                : "bg-genesis-accent/10 text-genesis-accent border border-genesis-accent/30"
+            }`}
+            title={aiModel === "pro" ? "Using Pro (quality) — click for Flash (speed)" : "Using Flash (speed) — click for Pro (quality)"}
+          >
+            {aiModel === "pro" ? "PRO" : "FLASH"}
+          </button>
+          <button onClick={handleSave} className="ml-1 p-1.5 hover:text-genesis-accent transition-colors" title="Save Game">
             <Save className="w-4 h-4" />
           </button>
         </div>
