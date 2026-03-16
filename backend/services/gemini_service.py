@@ -155,22 +155,32 @@ async def generate_text(
     model: str | None = None,
     temperature: float = 0.9,
     max_tokens: int = 2048,
+    grounded: bool = False,
 ) -> str:
-    """Generate text using Gemini."""
+    """Generate text using Gemini, optionally grounded with Google Search."""
     model_id = model or settings.GEMINI_MODEL
 
     full_prompt = prompt
     if context:
         full_prompt = f"GAME CONTEXT:\n{json.dumps(context, indent=2, default=str)}\n\nPLAYER INPUT:\n{prompt}"
 
+    config = types.GenerateContentConfig(
+        system_instruction=system_instruction,
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+    )
+
+    # Add Google Search grounding for factual accuracy (D&D rules, lore, etc.)
+    if grounded:
+        try:
+            config.tools = [types.Tool(google_search=types.GoogleSearch())]
+        except Exception:
+            logger.debug("Google Search grounding not available, proceeding without")
+
     response = await _get_client().aio.models.generate_content(
         model=model_id,
         contents=full_prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-        ),
+        config=config,
     )
     return response.text or ""
 

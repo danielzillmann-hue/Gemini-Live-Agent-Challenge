@@ -12,6 +12,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from google.genai import types
 from config import settings
 from game.engine import game_engine, create_character
 from game.models import (
@@ -435,6 +436,100 @@ async def text_to_speech(req: TTSRequest):
     except Exception as e:
         logger.exception("TTS generation failed: %s", e)
         return {"audio": "", "format": "none", "fallback": True}
+
+
+# ── Gemini Live API — Real-Time Voice Conversation ────────────────────────
+
+@app.websocket("/ws/{session_id}/live/{npc_id}")
+async def websocket_live_voice(ws: WebSocket, session_id: str, npc_id: str):
+    """Real-time voice conversation with an NPC using Gemini Live API.
+
+    Client sends raw PCM audio chunks (16-bit, 16kHz, little-endian) as base64.
+    Server responds with audio chunks from the NPC's voice.
+    """
+    session = game_engine.get_session(session_id)
+    if not session:
+        await ws.close(code=4004, reason="Session not found")
+        return
+
+    # Find the NPC
+    npc = session.world.npcs.get(npc_id)
+    npc_name = npc.name if npc else "Narrator"
+    npc_personality = npc.personality if npc else ""
+    npc_voice = npc.voice_style if npc else "neutral"
+
+    # Build game context for the NPC
+    context = game_engine.get_context_summary(session)
+    context_str = json.dumps(context, indent=2, default=str)[:2000]
+
+    await ws.accept()
+    logger.info("Live voice session started with %s in session %s", npc_name, session_id)
+
+    try:
+        from services.live_api_service import create_live_session
+
+        async with await create_live_session(
+            npc_name=npc_name,
+            npc_personality=npc_personality,
+            npc_voice_style=npc_voice,
+            game_context=context_str,
+        ) as live_session:
+            # Notify client that live session is ready
+            await ws.send_json({"type": "live_ready", "data": {"npc": npc_name}})
+
+            while True:
+                # Receive audio from client
+                raw = await ws.receive_text()
+                msg = json.loads(raw)
+
+                if msg.get("type") == "audio_chunk":
+                    audio_b64 = msg["data"].get("audio", "")
+                    if audio_b64:
+                        audio_bytes = base64.b64decode(audio_b64)
+
+                        # Send to Gemini Live API
+                        await live_session.send_realtime_input(
+                            audio=types.Blob(
+                                data=audio_bytes,
+                                mime_type="audio/pcm;rate=16000",
+                            )
+                        )
+
+                elif msg.get("type") == "end_conversation":
+                    break
+
+            # Collect any pending responses
+            try:
+                async for response in live_session.receive():
+                    if response.server_content and response.server_content.model_turn:
+                        for part in response.server_content.model_turn.parts:
+                            if part.inline_data and part.inline_data.data:
+                                audio_b64 = base64.b64encode(part.inline_data.data).decode()
+                                await ws.send_json({
+                                    "type": "audio_response",
+                                    "data": {"audio": audio_b64, "npc": npc_name},
+                                })
+                            if part.text:
+                                # Also send text transcription
+                                await ws.send_json({
+                                    "type": "live_transcription",
+                                    "data": {"text": part.text, "speaker": npc_name},
+                                })
+                    if response.server_content and response.server_content.turn_complete:
+                        await ws.send_json({"type": "turn_complete", "data": {}})
+            except Exception:
+                pass
+
+    except ImportError:
+        await ws.send_json({"type": "error", "data": {"message": "Live API not available"}})
+    except Exception as e:
+        logger.exception("Live voice session error: %s", e)
+        try:
+            await ws.send_json({"type": "error", "data": {"message": f"Live session failed: {str(e)}"}})
+        except Exception:
+            pass
+    finally:
+        logger.info("Live voice session ended with %s", npc_name)
 
 
 # ── WebSocket Game Loop ───────────────────────────────────────────────────

@@ -1,8 +1,10 @@
 "use client";
 
-import { Users, User, Heart, Skull } from "lucide-react";
+import { useParams } from "next/navigation";
+import { Users, User, Skull } from "lucide-react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { cn } from "@/lib/utils";
+import LiveVoice from "@/components/LiveVoice";
 
 function getRelationshipLabel(rel: number): { label: string; color: string } {
   if (rel >= 75) return { label: "Allied", color: "text-genesis-green" };
@@ -13,6 +15,8 @@ function getRelationshipLabel(rel: number): { label: string; color: string } {
 }
 
 export default function NPCJournal() {
+  const params = useParams();
+  const sessionId = params?.sessionId as string || "";
   const { npcs, world } = useGameStore();
   const allNpcs = {
     ...npcs,
@@ -89,6 +93,24 @@ export default function NPCJournal() {
                       </li>
                     ))}
                   </ul>
+                </div>
+              )}
+
+              {/* Live Voice Conversation */}
+              {!npc.is_hostile && sessionId && (
+                <div className="mt-2 pt-2 border-t border-genesis-border/50">
+                  <LiveVoice
+                    sessionId={sessionId}
+                    npcId={npc.id}
+                    npcName={npc.name}
+                    onTranscription={(text, speaker) => {
+                      useGameStore.getState().addStoryEntry({
+                        type: "dialogue",
+                        content: text,
+                        speaker,
+                      });
+                    }}
+                  />
                 </div>
               )}
             </div>
