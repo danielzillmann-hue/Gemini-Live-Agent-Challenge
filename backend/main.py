@@ -750,7 +750,8 @@ async def _handle_start_game(session_id: str, session) -> None:
         return
 
     # Prevent duplicate openings — only run once per session
-    if session_id in _started_sessions:
+    # Also treat restored sessions (with existing events) as already started
+    if session_id in _started_sessions or len(session.story_events) > 0:
         # Late joiner — send them a recap instead of replaying the opening
         if session.story_events:
             # Send existing story events so they can catch up

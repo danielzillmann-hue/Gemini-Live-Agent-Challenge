@@ -74,7 +74,18 @@ export default function GamePage() {
 
       const createdChar = sessionStorage.getItem(`genesis_char_${sessionId}`);
       if (createdChar) {
-        // This tab already created a character — restore name
+        // This tab already created or loaded a character
+        if (createdChar === "returning") {
+          // Returning from a saved session — pick first character after sync
+          const timer2 = setTimeout(() => {
+            const ps = useGameStore.getState().players;
+            if (ps.length > 0) {
+              setMyCharacterName(ps[0].name);
+              sessionStorage.setItem(`genesis_char_${sessionId}`, ps[0].name);
+            }
+          }, 2500);
+          return () => clearTimeout(timer2);
+        }
         setMyCharacterName(createdChar);
         return;
       }

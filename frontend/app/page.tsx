@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import { useGameStore } from "@/hooks/useGameStore";
 import CharacterCreation from "@/components/CharacterCreation";
 
-type Phase = "title" | "setup" | "join" | "characters" | "launching";
+type Phase = "title" | "setup" | "join" | "continue" | "characters" | "launching";
 
 const PRESETS = [
   {
@@ -42,6 +42,29 @@ export default function HomePage() {
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [savedSessions, setSavedSessions] = useState<Array<Record<string, unknown>>>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+
+  async function loadSavedSessions() {
+    setLoadingSessions(true);
+    try {
+      const sessions = await api.listSessions();
+      setSavedSessions(sessions.filter((s) => (s.player_count as number) > 0));
+    } catch {
+      setSavedSessions([]);
+    } finally {
+      setLoadingSessions(false);
+    }
+    setPhase("continue");
+  }
+
+  function handleContinueSession(sid: string, name: string) {
+    setSessionId(sid);
+    setSession(sid, name, "");
+    sessionStorage.setItem(`genesis_char_${sid}`, "returning");
+    setPhase("launching");
+    setTimeout(() => router.push(`/game/${sid}`), 1500);
+  }
 
   async function handleJoinSession() {
     const code = joinCode.trim();
@@ -160,6 +183,13 @@ export default function HomePage() {
               >
                 <Users className="inline-block w-5 h-5 mr-2 -mt-0.5" />
                 Join Game
+              </button>
+              <button
+                onClick={loadSavedSessions}
+                className="genesis-button-secondary text-lg px-8 py-3"
+              >
+                <Scroll className="inline-block w-5 h-5 mr-2 -mt-0.5" />
+                Continue
               </button>
             </motion.div>
 
@@ -328,6 +358,69 @@ export default function HomePage() {
               >
                 <Users className="inline w-4 h-4 mr-1 -mt-0.5" />
                 Join Session
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── Continue Campaign ─────────────────────────────────── */}
+        {phase === "continue" && (
+          <motion.div
+            key="continue"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -30 }}
+            transition={{ duration: 0.6 }}
+            className="relative z-10 w-full max-w-lg px-6"
+          >
+            <h2 className="font-display text-4xl text-genesis-accent text-center mb-2 tracking-wider">
+              Continue Adventure
+            </h2>
+            <p className="text-genesis-text-dim text-center mb-8">
+              Pick up where you left off
+            </p>
+
+            <div className="space-y-3">
+              {loadingSessions && (
+                <div className="genesis-panel p-8 text-center">
+                  <div className="thinking-indicator inline-flex">
+                    <span className="dot" /><span className="dot" /><span className="dot" />
+                  </div>
+                  <p className="text-genesis-text-dim text-sm mt-2">Loading saved games...</p>
+                </div>
+              )}
+
+              {!loadingSessions && savedSessions.length === 0 && (
+                <div className="genesis-panel p-8 text-center text-genesis-text-dim">
+                  <Scroll className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">No saved campaigns found</p>
+                  <p className="text-xs mt-1">Start a new campaign and save it to continue later</p>
+                </div>
+              )}
+
+              {savedSessions.map((s) => (
+                <button
+                  key={s.id as string}
+                  onClick={() => handleContinueSession(s.id as string, s.campaign_name as string)}
+                  className="genesis-panel p-4 w-full text-left hover:border-genesis-accent/50 transition-all cursor-pointer"
+                >
+                  <div className="font-display text-genesis-text text-sm tracking-wider">
+                    {(s.campaign_name as string) || "Unnamed Campaign"}
+                  </div>
+                  <div className="text-genesis-text-dim text-xs mt-1">
+                    {s.player_count as number} character{(s.player_count as number) !== 1 ? "s" : ""}
+                    {s.is_active ? " • Active" : " • Ended"}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex justify-between mt-8">
+              <button
+                onClick={() => setPhase("title")}
+                className="genesis-button-secondary"
+              >
+                Back
               </button>
             </div>
           </motion.div>
