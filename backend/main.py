@@ -522,6 +522,8 @@ async def websocket_live_voice(ws: WebSocket, session_id: str, npc_id: str):
             await ws.send_json({"type": "live_ready", "data": {"npc": npc_name}})
 
             conversation_active = True
+            npc_transcript_buffer = []  # Buffer NPC words into sentences
+            player_transcript_buffer = []  # Buffer player words
 
             async def receive_from_gemini():
                 """Receive audio/text responses from Gemini and forward to client."""
@@ -530,6 +532,8 @@ async def websocket_live_voice(ws: WebSocket, session_id: str, npc_id: str):
                         if not conversation_active:
                             break
                         sc = response.server_content
+
+                        # Forward audio chunks to client for playback
                         if sc and sc.model_turn:
                             for part in sc.model_turn.parts:
                                 if part.inline_data and part.inline_data.data:
@@ -538,14 +542,50 @@ async def websocket_live_voice(ws: WebSocket, session_id: str, npc_id: str):
                                         "type": "audio_response",
                                         "data": {"audio": audio_b64, "npc": npc_name},
                                     })
+
+                        # Buffer NPC transcription into complete messages
                         if sc and sc.output_transcription and sc.output_transcription.text:
-                            await ws.send_json({
-                                "type": "live_transcription",
-                                "data": {"text": sc.output_transcription.text, "speaker": npc_name},
-                            })
+                            npc_transcript_buffer.append(sc.output_transcription.text)
+
+                        # Buffer player transcription (input)
+                        if sc and sc.input_transcription and sc.input_transcription.text:
+                            player_transcript_buffer.append(sc.input_transcription.text)
+
+                        # On turn complete, flush buffered transcription as one message
                         if sc and sc.turn_complete:
+                            # Send player's speech as one message
+                            if player_transcript_buffer:
+                                player_text = "".join(player_transcript_buffer).strip()
+                                if player_text:
+                                    await ws.send_json({
+                                        "type": "live_transcription",
+                                        "data": {"text": player_text, "speaker": "You"},
+                                    })
+                                player_transcript_buffer.clear()
+
+                            # Send NPC's speech as one message
+                            if npc_transcript_buffer:
+                                npc_text = "".join(npc_transcript_buffer).strip()
+                                if npc_text:
+                                    await ws.send_json({
+                                        "type": "live_transcription",
+                                        "data": {"text": npc_text, "speaker": npc_name},
+                                    })
+                                npc_transcript_buffer.clear()
+
                             await ws.send_json({"type": "turn_complete", "data": {}})
                 except Exception as e:
+                    # Flush remaining buffers
+                    if npc_transcript_buffer:
+                        npc_text = "".join(npc_transcript_buffer).strip()
+                        if npc_text:
+                            try:
+                                await ws.send_json({
+                                    "type": "live_transcription",
+                                    "data": {"text": npc_text, "speaker": npc_name},
+                                })
+                            except Exception:
+                                pass
                     logger.debug("Gemini receive ended: %s", e)
 
             async def receive_from_client():

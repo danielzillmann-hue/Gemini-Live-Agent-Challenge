@@ -71,15 +71,24 @@ async def create_live_session(
                 parts=[types.Part(text=system_instruction)]
             ),
             output_audio_transcription=types.AudioTranscriptionConfig(),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
         )
     except (AttributeError, TypeError):
-        # Fallback if AudioTranscriptionConfig not available in SDK version
-        config = types.LiveConnectConfig(
-            response_modalities=["AUDIO"],
-            system_instruction=types.Content(
-                parts=[types.Part(text=system_instruction)]
-            ),
-        )
+        try:
+            config = types.LiveConnectConfig(
+                response_modalities=["AUDIO"],
+                system_instruction=types.Content(
+                    parts=[types.Part(text=system_instruction)]
+                ),
+                output_audio_transcription=types.AudioTranscriptionConfig(),
+            )
+        except (AttributeError, TypeError):
+            config = types.LiveConnectConfig(
+                response_modalities=["AUDIO"],
+                system_instruction=types.Content(
+                    parts=[types.Part(text=system_instruction)]
+                ),
+            )
 
     return client.aio.live.connect(model=LIVE_MODEL, config=config)
 
