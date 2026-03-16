@@ -110,7 +110,8 @@ export default function NarratorVoice() {
     lastSpokenIndex.current = storyLog.length;
 
     for (const entry of newEntries) {
-      if (entry.type !== "narration" && entry.type !== "dialogue") continue;
+      // Only speak narration, not dialogue (Live API handles NPC voice directly)
+      if (entry.type !== "narration") continue;
 
       const text = cleanText(entry.content);
       if (!text || text.length < 3) continue;

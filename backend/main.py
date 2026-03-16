@@ -651,6 +651,34 @@ async def websocket_game(ws: WebSocket, session_id: str):
     await manager.connect(session_id, ws)
     await manager.send_personal(ws, {"type": "game_state_sync", "data": session.model_dump(mode="json")})
 
+    # For restored sessions, send recap on connect (no start_game needed)
+    if session.story_events and session_id not in _started_sessions:
+        _started_sessions.add(session_id)
+        recent = [e for e in session.story_events[-10:] if e.event_type == "narration" and e.content]
+        if recent:
+            await manager.send_personal(ws, {
+                "type": "system_notice",
+                "data": {"message": f"Welcome back to {session.world.campaign_name}. Here's where you left off..."},
+            })
+            for event in recent[-3:]:
+                await manager.send_personal(ws, {
+                    "type": "system_notice",
+                    "data": {"message": event.content},
+                })
+        # Restore scene image and world map
+        for loc in session.world.locations.values():
+            if loc.id == session.world.current_location_id and loc.image_url:
+                await manager.send_personal(ws, {
+                    "type": "scene_image",
+                    "data": {"url": loc.image_url, "description": loc.name},
+                })
+                break
+        if session.world.world_map_url:
+            await manager.send_personal(ws, {
+                "type": "world_map_update",
+                "data": {"url": session.world.world_map_url},
+            })
+
     try:
         while True:
             raw = await ws.receive_text()
@@ -817,8 +845,8 @@ async def _handle_start_game(session_id: str, session) -> None:
     if session_id in _started_sessions:
         # Late joiner to an active session
         await manager.broadcast(session_id, {
-            "type": "narration",
-            "data": {"content": f"A new adventurer joins the party! Welcome to {session.world.campaign_name}."},
+            "type": "system_notice",
+            "data": {"message": f"A new adventurer joins the party! Welcome to {session.world.campaign_name}."},
         })
         await manager.broadcast(session_id, {
             "type": "game_state_sync",
@@ -826,47 +854,9 @@ async def _handle_start_game(session_id: str, session) -> None:
         })
         return
 
-    # Restored session from Firestore — replay recent story and resume
+    # Restored session — already handled on WebSocket connect
     if len(session.story_events) > 0:
         _started_sessions.add(session_id)
-
-        # Replay last few narration events so the player sees where they left off
-        recent = [e for e in session.story_events[-10:] if e.event_type == "narration" and e.content]
-        if recent:
-            # Send a "Previously on..." header
-            await manager.broadcast(session_id, {
-                "type": "narration",
-                "data": {"content": f"Welcome back to {session.world.campaign_name}. Here's where you left off..."},
-            })
-            # Replay the last few narration entries
-            for event in recent[-3:]:
-                await manager.broadcast(session_id, {
-                    "type": "narration",
-                    "data": {"content": event.content},
-                })
-
-        # Sync full state
-        await manager.broadcast(session_id, {
-            "type": "game_state_sync",
-            "data": session.model_dump(mode="json"),
-        })
-
-        # Restore scene image if available
-        for loc in session.world.locations.values():
-            if loc.id == session.world.current_location_id and loc.image_url:
-                await manager.broadcast(session_id, {
-                    "type": "scene_image",
-                    "data": {"url": loc.image_url, "description": loc.name},
-                })
-                break
-
-        # Restore world map
-        if session.world.world_map_url:
-            await manager.broadcast(session_id, {
-                "type": "world_map_update",
-                "data": {"url": session.world.world_map_url},
-            })
-
         return
 
     _started_sessions.add(session_id)
