@@ -30,6 +30,7 @@ export default function LiveVoice({
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const npcSpeakingRef = useRef(false);
 
   const startConversation = useCallback(async () => {
     try {
@@ -51,12 +52,15 @@ export default function LiveVoice({
           setIsActive(true);
           await startMicrophone();
         } else if (msg.type === "audio_response") {
-          // Play NPC audio response
-          await playAudio(msg.data.audio);
+          // Play NPC audio (don't await — prevents blocking message handler)
+          npcSpeakingRef.current = true;
+          playAudio(msg.data.audio);
         } else if (msg.type === "live_transcription") {
           onTranscription?.(msg.data.text, msg.data.speaker);
         } else if (msg.type === "turn_complete") {
-          // NPC finished speaking — player can talk again
+          // NPC finished speaking — unmute mic for next player input
+          npcSpeakingRef.current = false;
+          setStatus(`Speaking with ${npcName}`);
         } else if (msg.type === "error") {
           setStatus(`Error: ${msg.data.message}`);
           stopConversation();
@@ -102,7 +106,8 @@ export default function LiveVoice({
       processorRef.current = processor;
 
       processor.onaudioprocess = (e) => {
-        if (isMuted || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+        // Don't send mic audio while NPC is speaking (prevents echo/confusion)
+        if (isMuted || npcSpeakingRef.current || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
         const inputData = e.inputBuffer.getChannelData(0);
         // Convert Float32 to Int16 PCM
