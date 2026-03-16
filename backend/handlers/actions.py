@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
-from game.engine import game_engine
+from game.engine import game_engine, roll_d20
 from game.models import GameSession, StoryEvent
 from agents.orchestrator import process_player_input, process_tool_results
 from services import firestore_service
@@ -36,6 +37,10 @@ async def process_single_action(
     tool_events = await process_player_input(session_id, player_input, context)
     ws_messages = await process_tool_results(session_id, tool_events, session)
 
+    # Check if the AI narrated combat without calling dice tools
+    has_dice = any(m["type"] == "dice_result" for m in ws_messages)
+    has_combat_narration = False
+
     for msg in ws_messages:
         msg["session_id"] = session_id
         await _broadcast(session_id, msg)
@@ -50,6 +55,53 @@ async def process_single_action(
             if "[NEW_SCENE]" in content or "[CINEMATIC]" in content:
                 clean_content = content.replace("[NEW_SCENE]", "").replace("[CINEMATIC]", "").strip()
                 asyncio.create_task(_generate_scene_from_narration(session_id, session, clean_content))
+
+            # Detect if AI narrated combat/checks without rolling dice
+            combat_keywords = re.compile(
+                r'\b(attack|swing|strike|slash|stab|shoot|cast|hit|miss|damage|wound|block|dodge|parry|'
+                r'search|examine|investigate|persuade|deceive|intimidate|sneak|climb|jump|pick the lock|'
+                r'perception|check|roll)\b', re.IGNORECASE
+            )
+            if combat_keywords.search(content):
+                has_combat_narration = True
+
+    # If AI narrated combat/checks but didn't roll dice, inject a visible roll
+    if has_combat_narration and not has_dice and session.players:
+        player = session.get_alive_players()[0] if session.get_alive_players() else session.players[0]
+        total, raw = roll_d20(player.ability_scores.modifier("strength"))
+        # Determine what kind of check from the player input
+        ability = "strength"
+        for ab in ["wisdom", "dexterity", "charisma", "intelligence", "constitution"]:
+            if ab[:3].lower() in player_input.lower():
+                ability = ab
+                break
+        if any(w in player_input.lower() for w in ["search", "look", "examine", "investigate", "notice", "spot"]):
+            ability = "wisdom"
+        elif any(w in player_input.lower() for w in ["persuade", "convince", "talk", "negotiate", "charm"]):
+            ability = "charisma"
+        elif any(w in player_input.lower() for w in ["sneak", "hide", "dodge", "climb", "jump", "pick"]):
+            ability = "dexterity"
+
+        modifier = player.ability_scores.modifier(ability)
+        total = raw + modifier
+        dc = 12  # Default DC
+        success = total >= dc
+
+        await _broadcast(session_id, {
+            "session_id": session_id,
+            "type": "dice_result",
+            "data": {
+                "character": player.name,
+                "ability": ability,
+                "roll_type": "d20",
+                "value": raw,
+                "total": total,
+                "dc": dc,
+                "success": success,
+                "is_critical": raw == 20,
+                "is_fumble": raw == 1,
+            },
+        })
 
     # Sync full game state
     await _broadcast(session_id, {
