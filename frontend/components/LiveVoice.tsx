@@ -128,42 +128,52 @@ export default function LiveVoice({
     }
   }
 
-  // Shared playback context for smooth audio (Gemini outputs 24kHz PCM)
+  // Shared playback context for smooth audio (Gemini outputs 24kHz 16-bit PCM)
   const playbackCtxRef = useRef<AudioContext | null>(null);
-  const playbackQueue = useRef<AudioBuffer[]>([]);
-  const isPlayingAudio = useRef(false);
   const nextPlayTime = useRef(0);
 
   function getPlaybackCtx(): AudioContext {
     if (!playbackCtxRef.current || playbackCtxRef.current.state === "closed") {
       playbackCtxRef.current = new AudioContext({ sampleRate: 24000 });
     }
+    if (playbackCtxRef.current.state === "suspended") {
+      playbackCtxRef.current.resume();
+    }
     return playbackCtxRef.current;
   }
 
   async function playAudio(base64Audio: string) {
     try {
-      const binaryStr = atob(base64Audio);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) {
-        bytes[i] = binaryStr.charCodeAt(i);
+      // Decode base64 to raw bytes
+      const raw = Uint8Array.from(atob(base64Audio), (c) => c.charCodeAt(0));
+
+      // Ensure we have an even number of bytes (16-bit = 2 bytes per sample)
+      const validLength = raw.length - (raw.length % 2);
+      if (validLength === 0) return;
+
+      // Create a proper ArrayBuffer and view for Int16 interpretation
+      const buffer = new ArrayBuffer(validLength);
+      const view = new Uint8Array(buffer);
+      view.set(raw.subarray(0, validLength));
+
+      // Interpret as 16-bit little-endian PCM
+      const dataView = new DataView(buffer);
+      const numSamples = validLength / 2;
+      const float32 = new Float32Array(numSamples);
+      for (let i = 0; i < numSamples; i++) {
+        const sample = dataView.getInt16(i * 2, true); // little-endian
+        float32[i] = sample / 32768.0;
       }
 
-      // Gemini Live API outputs 24kHz 16-bit PCM mono
+      // Create audio buffer at 24kHz (Gemini Live API output rate)
       const ctx = getPlaybackCtx();
-      const int16 = new Int16Array(bytes.buffer);
-      const float32 = new Float32Array(int16.length);
-      for (let i = 0; i < int16.length; i++) {
-        float32[i] = int16[i] / 0x8000;
-      }
-
       const audioBuffer = ctx.createBuffer(1, float32.length, 24000);
       audioBuffer.getChannelData(0).set(float32);
 
-      // Schedule chunks sequentially for gapless playback
+      // Schedule for gapless sequential playback
       const now = ctx.currentTime;
       if (nextPlayTime.current < now) {
-        nextPlayTime.current = now;
+        nextPlayTime.current = now + 0.05; // Small buffer to prevent underrun
       }
 
       const source = ctx.createBufferSource();
