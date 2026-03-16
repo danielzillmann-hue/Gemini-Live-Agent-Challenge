@@ -474,51 +474,62 @@ async def websocket_live_voice(ws: WebSocket, session_id: str, npc_id: str):
             npc_voice_style=npc_voice,
             game_context=context_str,
         ) as live_session:
-            # Notify client that live session is ready
             await ws.send_json({"type": "live_ready", "data": {"npc": npc_name}})
 
-            while True:
-                # Receive audio from client
-                raw = await ws.receive_text()
-                msg = json.loads(raw)
+            conversation_active = True
 
-                if msg.get("type") == "audio_chunk":
-                    audio_b64 = msg["data"].get("audio", "")
-                    if audio_b64:
-                        audio_bytes = base64.b64decode(audio_b64)
+            async def receive_from_gemini():
+                """Receive audio/text responses from Gemini and forward to client."""
+                try:
+                    async for response in live_session.receive():
+                        if not conversation_active:
+                            break
+                        sc = response.server_content
+                        if sc and sc.model_turn:
+                            for part in sc.model_turn.parts:
+                                if part.inline_data and part.inline_data.data:
+                                    audio_b64 = base64.b64encode(part.inline_data.data).decode()
+                                    await ws.send_json({
+                                        "type": "audio_response",
+                                        "data": {"audio": audio_b64, "npc": npc_name},
+                                    })
+                        if sc and sc.output_transcription and sc.output_transcription.text:
+                            await ws.send_json({
+                                "type": "live_transcription",
+                                "data": {"text": sc.output_transcription.text, "speaker": npc_name},
+                            })
+                        if sc and sc.turn_complete:
+                            await ws.send_json({"type": "turn_complete", "data": {}})
+                except Exception as e:
+                    logger.debug("Gemini receive ended: %s", e)
 
-                        # Send to Gemini Live API
-                        await live_session.send_realtime_input(
-                            audio=types.Blob(
-                                data=audio_bytes,
-                                mime_type="audio/pcm;rate=16000",
-                            )
-                        )
+            async def receive_from_client():
+                """Receive audio from client and forward to Gemini."""
+                nonlocal conversation_active
+                try:
+                    while conversation_active:
+                        raw = await ws.receive_text()
+                        msg = json.loads(raw)
+                        if msg.get("type") == "audio_chunk":
+                            audio_b64 = msg["data"].get("audio", "")
+                            if audio_b64:
+                                await live_session.send_realtime_input(
+                                    audio=types.Blob(
+                                        data=base64.b64decode(audio_b64),
+                                        mime_type="audio/pcm;rate=16000",
+                                    )
+                                )
+                        elif msg.get("type") == "end_conversation":
+                            conversation_active = False
+                            break
+                except Exception as e:
+                    logger.debug("Client receive ended: %s", e)
+                    conversation_active = False
 
-                elif msg.get("type") == "end_conversation":
-                    break
-
-            # Collect any pending responses
-            try:
-                async for response in live_session.receive():
-                    if response.server_content and response.server_content.model_turn:
-                        for part in response.server_content.model_turn.parts:
-                            if part.inline_data and part.inline_data.data:
-                                audio_b64 = base64.b64encode(part.inline_data.data).decode()
-                                await ws.send_json({
-                                    "type": "audio_response",
-                                    "data": {"audio": audio_b64, "npc": npc_name},
-                                })
-                            if part.text:
-                                # Also send text transcription
-                                await ws.send_json({
-                                    "type": "live_transcription",
-                                    "data": {"text": part.text, "speaker": npc_name},
-                                })
-                    if response.server_content and response.server_content.turn_complete:
-                        await ws.send_json({"type": "turn_complete", "data": {}})
-            except Exception:
-                pass
+            # Run both directions concurrently
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(receive_from_gemini())
+                tg.create_task(receive_from_client())
 
     except ImportError:
         await ws.send_json({"type": "error", "data": {"message": "Live API not available"}})

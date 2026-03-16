@@ -19,7 +19,7 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-LIVE_MODEL = "gemini-2.5-flash-preview-native-audio-dialog"
+LIVE_MODEL = "gemini-2.5-flash-native-audio"
 
 
 async def create_live_session(
@@ -32,7 +32,12 @@ async def create_live_session(
 
     Returns an async context manager for the live session.
     """
-    client = genai.Client(vertexai=True, project=settings.PROJECT_ID, location=settings.REGION)
+    client = genai.Client(
+        vertexai=True,
+        project=settings.PROJECT_ID,
+        location=settings.REGION,
+        http_options=types.HttpOptions(api_version="v1beta1"),
+    )
 
     # Build system instruction for this NPC
     voice_descriptions = {
@@ -64,6 +69,7 @@ async def create_live_session(
         system_instruction=types.Content(
             parts=[types.Part(text=system_instruction)]
         ),
+        output_audio_transcription=types.AudioTranscriptionConfig(),
     )
 
     return client.aio.live.connect(model=LIVE_MODEL, config=config)
