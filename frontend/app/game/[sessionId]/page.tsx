@@ -114,12 +114,16 @@ export default function GamePage() {
   }, []);
 
   // Start game once connected and not yet started
+  // Don't send start_game for restored/continued sessions
   useEffect(() => {
     if (isConnected && !gameStarted && players.length > 0) {
-      send("start_game", {});
+      const isReturning = sessionStorage.getItem(`genesis_char_${sessionId}`) === "returning";
+      if (!isReturning) {
+        send("start_game", {});
+      }
       setGameStarted(true);
     }
-  }, [isConnected, gameStarted, players.length, send]);
+  }, [isConnected, gameStarted, players.length, send, sessionId]);
 
   function handleSendMessage() {
     const text = input.trim();
