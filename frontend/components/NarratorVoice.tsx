@@ -116,22 +116,8 @@ export default function NarratorVoice() {
       const text = cleanText(entry.content);
       if (!text || text.length < 3) continue;
 
-      // Determine voice based on entry type and speaker
-      let voiceType = "narrator";
-      if (entry.type === "dialogue" && entry.speaker) {
-        // Try to match NPC voice style from the store
-        const npcs = useGameStore.getState().npcs;
-        const npc = Object.values(npcs).find(
-          (n) => n.name.toLowerCase() === (entry.speaker || "").toLowerCase()
-        );
-        if (npc) {
-          voiceType = VOICE_MAP[npc.voice_style] || "npc_male";
-        } else {
-          voiceType = "npc_male";
-        }
-      }
-
-      audioQueue.current.push({ text, voiceType });
+      // Narration always uses the narrator voice
+      audioQueue.current.push({ text, voiceType: "narrator" });
     }
 
     if (!isPlaying.current && audioQueue.current.length > 0) {
