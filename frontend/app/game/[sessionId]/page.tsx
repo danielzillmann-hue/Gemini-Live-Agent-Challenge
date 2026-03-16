@@ -101,6 +101,18 @@ export default function GamePage() {
     }
   }, [isConnected, sessionId]);
 
+  // Fetch current model on load
+  useEffect(() => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+    fetch(`${API_URL}/api/settings/model`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.model?.includes("pro")) setAiModel("pro");
+        else setAiModel("flash");
+      })
+      .catch(() => {});
+  }, []);
+
   // Start game once connected and not yet started
   useEffect(() => {
     if (isConnected && !gameStarted && players.length > 0) {

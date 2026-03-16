@@ -96,6 +96,25 @@ export default function NPCJournal() {
                 </div>
               )}
 
+              {/* NPC Memories */}
+              {(npc as any).memories && (npc as any).memories.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-genesis-border/50">
+                  <div className="text-genesis-text-dim text-[9px] tracking-wider uppercase mb-1">
+                    Memories
+                  </div>
+                  <ul className="space-y-0.5">
+                    {((npc as any).memories as Array<{event: string; sentiment: number}>).slice(-5).map((mem, i) => (
+                      <li key={i} className="text-genesis-text-dim text-[10px] pl-2 border-l border-genesis-border flex items-center gap-1">
+                        <span className={mem.sentiment > 0 ? "text-genesis-green" : mem.sentiment < 0 ? "text-genesis-red" : ""}>
+                          {mem.sentiment > 0 ? "+" : ""}{mem.sentiment !== 0 ? mem.sentiment : ""}
+                        </span>
+                        {mem.event}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {/* Live Voice Conversation */}
               {!npc.is_hostile && sessionId && (
                 <div className="mt-2 pt-2 border-t border-genesis-border/50">

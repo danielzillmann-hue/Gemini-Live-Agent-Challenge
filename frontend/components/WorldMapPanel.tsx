@@ -126,6 +126,46 @@ export default function WorldMapPanel() {
               </div>
             </div>
           )}
+          {/* Factions */}
+          {world?.factions && Object.keys(world.factions).length > 0 && (
+            <div>
+              <div className="text-genesis-accent text-[10px] tracking-[0.2em] uppercase mb-1.5">
+                Factions
+              </div>
+              <div className="space-y-1">
+                {Object.values(world.factions as Record<string, any>).map((faction: any) => (
+                  <div key={faction.id || faction.name} className="genesis-panel p-2">
+                    <div className="text-genesis-text text-xs font-display tracking-wider">
+                      {faction.name}
+                    </div>
+                    {faction.description && (
+                      <div className="text-genesis-text-dim text-[10px] mt-0.5 line-clamp-1">
+                        {faction.description}
+                      </div>
+                    )}
+                    {faction.reputation && Object.keys(faction.reputation).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {Object.entries(faction.reputation as Record<string, number>).map(([char, rep]) => (
+                          <span
+                            key={char}
+                            className={`text-[9px] px-1 py-0.5 rounded ${
+                              (rep as number) > 0
+                                ? "bg-genesis-green/15 text-genesis-green"
+                                : (rep as number) < 0
+                                  ? "bg-genesis-red/15 text-genesis-red"
+                                  : "bg-genesis-bg text-genesis-text-dim"
+                            }`}
+                          >
+                            {char}: {(rep as number) > 0 ? "+" : ""}{rep as number}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
